@@ -6,6 +6,11 @@ import cv2
 import numpy as np
 import math
 
+
+def gaussian_function(sigma, u):
+    return 1/(math.sqrt(2*math.pi)*sigma)*math.e**-(u**2/(2*sigma**2))
+
+
 def gaussian_filter(sigma, filter_length=None):
     '''
     Given a sigma, return a 1-D Gaussian filter.
@@ -15,21 +20,22 @@ def gaussian_filter(sigma, filter_length=None):
                containing the symmetric, discrete approximation of a Gaussian with sigma
                Summation of the array-values must be equal to one.
     '''
-    if filter_length==None:
+    if filter_length is None:
         #determine the length of the filter
-        filter_length= math.ceil(sigma*5) 
+        filter_length = math.ceil(sigma*5)
         #make the length odd
-        filter_length= 2*(int(filter_length)/2) +1   
+        filter_length = 2*(int(filter_length)/2) + 1
     
     #make sure sigma is a float
-    sigma=float(sigma)
+    sigma = float(sigma)
     
     #create the filter
-    result = np.zeros( filter_length )
+    result = np.zeros(filter_length)
     
     #do your best!
-    print('TODO')
-       
+    result = np.asarray(map(lambda u: gaussian_function(sigma, u), range(-(filter_length/2), filter_length/2 + 1, 1)))
+    result = result / result.sum()
+
     #return the filter
     return result
 
@@ -61,12 +67,10 @@ def gaussian_smooth1(img, sigma):
     
     #get the filtercv2.waitKey(0)
     filter = gaussian_filter(sigma)
-    
     #smooth every color-channel
     for c in range(3):
         #smooth the 2D image img[:,:,c]
         #tip: make use of numpy.convolve
-        print('TODO')
         
     
     return result
@@ -79,7 +83,7 @@ if __name__ == '__main__':
     test_gaussian_filter()
 
     #read an image
-    img = cv2.imread('image.png')
+    img = cv2.imread('face.tiff')
     
     #print the dimension of the image
     print img.shape
