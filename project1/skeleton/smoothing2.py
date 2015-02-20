@@ -20,7 +20,7 @@ def gaussian_smooth2(img, sigma):
             
     #Go ahead! 
     #Tip: smoothing=blurring, a filter=a kernel
-    print('TODO')
+    result = cv2.GaussianBlur(img, (filter_length, filter_length), sigma)
     
     return result
 
@@ -29,10 +29,10 @@ def gaussian_smooth2(img, sigma):
 #this part of the code is only executed if the file is run stand-alone
 if __name__ == '__main__':
     #read an image
-    img = cv2.imread('image.png')
+    img = cv2.imread('face.tiff')
     
     #show the image, and wait for a key to be pressed
-    cv2.imshow('img',img)
+    cv2.imshow('img', img)
     cv2.waitKey(0)
     
     #smooth the image
