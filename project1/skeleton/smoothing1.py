@@ -71,7 +71,10 @@ def gaussian_smooth1(img, sigma):
     for c in range(3):
         #smooth the 2D image img[:,:,c]
         #tip: make use of numpy.convolve
-        
+        for i in range(len(img[0, :, c])):
+            result[:, i, c] = np.convolve(img[:, i, c], filter, mode='same')
+        for i in range(len(img[:, 0, c])):
+            result[i, :, c] = np.convolve(img[i, :, c], filter, mode='same')
     
     return result
 
