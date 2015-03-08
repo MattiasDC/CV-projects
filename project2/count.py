@@ -19,7 +19,7 @@ def detect(img):
     img_g[:, :] = img[:, :, 0]
 
     #1. Do canny (determine the right parameters) on the gray scale image
-    edges = cv2.Canny(img, 5, 110)
+    edges = cv2.Canny(img, 55, 110)
     
     #Show the results of canny
     canny_result = np.copy(img_g)
@@ -28,9 +28,9 @@ def detect(img):
     cv2.waitKey(0)
 
     #2. Do hough transform on the gray scale image
-    circles = cv2.HoughCircles(img_g, cv2.cv.CV_HOUGH_GRADIENT, 2, 50, param1=110, param2=30)
+    circles = cv2.HoughCircles(img_g, cv2.cv.CV_HOUGH_GRADIENT, 2, 50,
+                               param1=110, param2=50, minRadius=20, maxRadius=100)
 
-    print circles
     circles = circles[0, :, :]
     #Show hough transform result
     showCircles(img, circles)
