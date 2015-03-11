@@ -30,7 +30,7 @@ def detect(img):
 
     #2. Do hough transform on the gray scale image
     circles = cv2.HoughCircles(img_g, cv2.cv.CV_HOUGH_GRADIENT, 2, 50,
-                               param1=110, param2=50, minRadius=15, maxRadius=100)
+                               param1=110, param2=30, minRadius=25, maxRadius=60)
 
     circles = circles[0, :, :]
     #Show hough transform result
@@ -53,7 +53,8 @@ def detect(img):
     circles = circles[selectedCircles]
 
     #Show final result
-    showCircles(img, circles)    
+    showCircles(img, circles)
+
     return circles
         
     
@@ -62,17 +63,11 @@ def getAverageColorInCircle(img, cx, cy, radius):
     Get the average color of img inside the circle located at (cx,cy) with radius.
     """
     maxy, maxx,channels = img.shape
-    nbVoxels = 0
-    C = np.zeros(3)
 
-    upper_left = max(cy-radius, 0), max(cx-radius, 0)
-    for y in range(upper_left[0], upper_left[0]+2*radius):
-        for x in range(upper_left[1], upper_left[1]+2*radius):
-            if x < maxx and y < maxy and math.hypot(x - cx, y - cy) < radius:
-                nbVoxels += 1
-                for i in range(channels):
-                    C[i] += img[y][x][i]
-    C = map(lambda e: e/nbVoxels, C)
+    mask = np.zeros((maxy, maxx), np.uint8)
+    cv2.circle(mask, (cx, cy), radius, 255, -1)
+
+    C = cv2.mean(img, mask)
     C = colorsys.rgb_to_hsv(C[2], C[1], C[0])
     return C
 
@@ -103,7 +98,7 @@ def showCircles(img, circles, text=None):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, cv2.cv.CV_RGB(0, 0, 255))
     #show the result
     cv2.imshow('img', img)
-    cv2.waitKey(0)    
+    cv2.waitKey(0)
 
 
 if __name__ == '__main__':
