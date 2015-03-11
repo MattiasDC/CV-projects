@@ -8,6 +8,7 @@ import cv2.cv
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+import colorsys
 
 
 def detect(img):
@@ -29,7 +30,7 @@ def detect(img):
 
     #2. Do hough transform on the gray scale image
     circles = cv2.HoughCircles(img_g, cv2.cv.CV_HOUGH_GRADIENT, 2, 50,
-                               param1=110, param2=50, minRadius=20, maxRadius=100)
+                               param1=110, param2=50, minRadius=15, maxRadius=100)
 
     circles = circles[0, :, :]
     #Show hough transform result
@@ -37,17 +38,17 @@ def detect(img):
     
     #3.a Get a feature vector (the average color) for each circle
     nbCircles = circles.shape[0]
-    features = np.zeros((nbCircles, 3), dtype=np.int)
+    features = np.zeros((nbCircles, 3))
     for i in range(nbCircles):
-        features[i, :] = getAverageColorInCircle(None, int(circles[i, 0]), int(circles[i, 1]), int(circles[i, 2])) #TODO!
+        features[i, :] = getAverageColorInCircle(img, int(circles[i, 0]), int(circles[i, 1]), int(circles[i, 2]))
     
     #3.b Show the image with the features (just to provide some help with selecting the parameters)
-    showCircles(img, circles, [str(features[i, :]) for i in range(nbCircles)])
+    showCircles(img, circles, [str(map("{0:.2f}".format, features[i, :])) for i in range(nbCircles)])
 
     #3.c Remove circles based on the features
     selectedCircles = np.zeros(nbCircles, np.bool)
     for i in range(nbCircles):
-        if True:    #TODO
+        if color_filter(features[i]):
             selectedCircles[i] = 1
     circles = circles[selectedCircles]
 
@@ -63,8 +64,21 @@ def getAverageColorInCircle(img, cx, cy, radius):
     maxy, maxx,channels = img.shape
     nbVoxels = 0
     C = np.zeros(3)
-    #TODO!
+
+    upper_left = max(cy-radius, 0), max(cx-radius, 0)
+    for y in range(upper_left[0], upper_left[0]+2*radius):
+        for x in range(upper_left[1], upper_left[1]+2*radius):
+            if x < maxx and y < maxy and math.hypot(x - cx, y - cy) < radius:
+                nbVoxels += 1
+                for i in range(channels):
+                    C[i] += img[y][x][i]
+    C = map(lambda e: e/nbVoxels, C)
+    C = colorsys.rgb_to_hsv(C[2], C[1], C[0])
     return C
+
+
+def color_filter(color):
+    return color[0] > 0.85
     
 
 def showCircles(img, circles, text=None):
