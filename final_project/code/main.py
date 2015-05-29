@@ -14,15 +14,16 @@ radiographs_dir = "../data/Radiographs/"
 def main():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
     gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
+    pca_result = map(lambda x: pca(np.array(x)), gpa_landmarks)
 
 
 def create_landmarks_data(file_dir):
-    landmarks_training_data = [[] for _ in range(0, 8)]
-    for file_name in os.listdir(file_dir):
+    landmarks_training_data = [[0]*(len(os.listdir(file_dir))/8) for _ in range(0, 8)]
+    for file_name in sorted(os.listdir(file_dir)):
         if fnmatch.fnmatch(file_name, '*.txt'):
             incisor_landmarks = parse_landmarks_file(file_name, file_dir)
-            incisor_id = int(re.match(".*-(\d+)\.txt", file_name).group(1))
-            landmarks_training_data[incisor_id-1].append(incisor_landmarks)
+            match = re.match(".*?(\d+)-(\d+)\.txt", file_name)
+            landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
     return landmarks_training_data
 
 
@@ -185,13 +186,13 @@ def separate_landmarks(landmarks):
 
 def project(W, X, mu=None):
     if mu is None:
-        return np.dot(X,W)
+        return np.dot(X, W)
     return np.dot(X - mu, W)
 
 
 def reconstruct(W, Y, mu=None):
     if mu is None:
-        return np.dot(Y,W.T)
+        return np.dot(Y, W.T)
     return np.dot(Y, W.T) + mu
 
 
@@ -204,24 +205,24 @@ def pca(X, num_components=0):
         num_components = n
     mu = X.mean(axis=0)
     X = X - mu
-    if n>d:
-        C = np.dot(X.T,X)
-        [eigenvalues,eigenvectors] = np.linalg.eigh(C)
+    if n > d:
+        C = np.dot(X.T, X)
+        [eigenvalues, eigenvectors] = np.linalg.eigh(C)
     else:
-        C = np.dot(X,X.T)
-        [eigenvalues,eigenvectors] = np.linalg.eigh(C)
-        eigenvectors = np.dot(X.T,eigenvectors)
+        C = np.dot(X, X.T)
+        [eigenvalues, eigenvectors] = np.linalg.eigh(C)
+        eigenvectors = np.dot(X.T, eigenvectors)
         for i in xrange(n):
-            eigenvectors[:,i] = eigenvectors[:,i]/np.linalg.norm(eigenvectors[:,i])
+            eigenvectors[:, i] = eigenvectors[:, i]/np.linalg.norm(eigenvectors[:, i])
     # or simply perform an economy size decomposition
     # eigenvectors, eigenvalues, variance = np.linalg.svd(X.T, full_matrices=False)
     # sort eigenvectors descending by their eigenvalue
     idx = np.argsort(-eigenvalues)
     eigenvalues = eigenvalues[idx]
-    eigenvectors = eigenvectors[:,idx]
+    eigenvectors = eigenvectors[:, idx]
     # select only num_components
     eigenvalues = eigenvalues[0:num_components].copy()
-    eigenvectors = eigenvectors[:,0:num_components].copy()
+    eigenvectors = eigenvectors[:, 0:num_components].copy()
     return [eigenvalues, eigenvectors, mu]
 
 
