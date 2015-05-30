@@ -5,6 +5,7 @@ import math
 import fnmatch
 import os
 import re
+import time
 
 
 landmarks_dir = "../data/Landmarks/original/"
@@ -15,6 +16,91 @@ def main():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
     gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
     pca_result = map(lambda x: pca(np.array(x)), gpa_landmarks)
+
+    cv2.namedWindow('window', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('window', 600, 800)
+    original_radiographs = read_radiographs(radiographs_dir)
+    for img in original_radiographs:
+        pre_process_radiograph(img)
+    # map(lambda x: pre_process_radiograph, original_radiographs)
+
+
+def read_radiographs(radiographs_dir):
+    radiographs_list = []
+    for file_name in sorted(os.listdir(radiographs_dir)):
+        if fnmatch.fnmatch(file_name, '*.tif'):
+            img = cv2.imread(radiographs_dir + '/' + file_name)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            radiographs_list.append(img)
+    return radiographs_list
+
+
+def pre_process_radiograph(radiograph):
+    crop_p = 0.1
+
+    cv2.imshow('window', radiograph)
+    cv2.waitKey()
+
+    height, width = radiograph.shape
+    cropped_img = radiograph[crop_p*height:(1-crop_p)*height, crop_p*width:(1-crop_p)*width]
+
+    blur_result = cv2.medianBlur(cropped_img, 17)
+    blur_result = cv2.GaussianBlur(blur_result, (5, 5), 3)
+    cv2.imshow('window', blur_result)
+    # cv2.waitKey()
+
+    otsu_threshold, _ = cv2.threshold(blur_result, 0, 255, cv2.THRESH_OTSU)
+    canny_result = cv2.Canny(blur_result, 0.05*otsu_threshold, 0.2*otsu_threshold)
+    cv2.imshow('window', canny_result)
+    # cv2.waitKey()
+
+    dilate_result = cv2.dilate(canny_result, (21, 21), iterations=10)
+    cv2.imshow('window', dilate_result)
+    # cv2.waitKey()
+
+    it_thresh_result = iterative_thresholding(cropped_img, dilate_result)
+    cv2.imshow('window', it_thresh_result)
+    cv2.waitKey()
+
+    s = time.time()
+    ad_thresh_result = cv2.adaptiveThreshold(it_thresh_result, 255, cv.CV_ADAPTIVE_THRESH_MEAN_C, cv.CV_THRESH_BINARY, 81, 10)
+    result = cv2.bitwise_and(it_thresh_result, ad_thresh_result)
+    print s-time.time()
+    cv2.imshow('window', result)
+    cv2.waitKey()
+
+    return dilate_result
+
+
+def iterative_thresholding(radiograph, mask):
+    threshold = cv2.mean(radiograph, mask)[0]
+    while True:
+        non_teeth_mean = cv2.mean(radiograph, cv2.threshold(radiograph, threshold, 255, cv2.THRESH_BINARY_INV)[1])[0]
+        teeth_mean = cv2.mean(radiograph, cv2.threshold(radiograph, threshold, 255, cv2.THRESH_BINARY)[1])[0]
+        print threshold, non_teeth_mean, teeth_mean
+        prev_threshold = threshold
+        threshold = (non_teeth_mean+teeth_mean)/2
+        if prev_threshold == threshold:
+            break
+    return cv2.threshold(radiograph, threshold, 1, cv2.THRESH_TOZERO)[1]
+
+
+# def adaptive_thresholding(radiograph, blocksize, ratio):
+#     padding = (blocksize-1)/2
+#     height, width = radiograph.shape
+#     radiograph = cv2.copyMakeBorder(radiograph, padding+1, padding+1, padding+1, padding+1, cv2.BORDER_CONSTANT, value=0)
+#     result = np.zeros(radiograph.shape)
+#
+#     for i in range(padding+1, height+padding+1):
+#         if i % 100 == 0:
+#             print i
+#         for j in range(padding+1, width+padding+1):
+#             if (radiograph[i, j]) != 0:
+#                 threshold = ratio*np.sum(radiograph[i-padding:i+padding+1, j-padding:j+padding+1]) / \
+#                 np.count_nonzero(radiograph[i-padding:i+padding+1, j-padding:j+padding+1])
+#                 if radiograph[i, j] >= threshold:
+#                     result[i, j] = radiograph[i, j]
+#     return result[padding+1:height+padding+2, padding+1:width+padding+2]
 
 
 def create_landmarks_data(file_dir):

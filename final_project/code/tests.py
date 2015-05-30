@@ -3,6 +3,24 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 
 
+def test_landmarks_interpretation():
+        landmarks_training_data = create_landmarks_data(landmarks_dir)
+        for i in range(14):
+            for j in range(8):
+                x, y = separate_landmarks(landmarks_training_data[j][i])
+                plt.plot(x, y, ".")
+                for k, (X, Y) in enumerate(zip(x, y)):
+                    plt.annotate('{}'.format(k), xy=(X, Y))
+                mx = np.mean(x)
+                my = np.mean(y)
+                dist, dx, dy = max(map(lambda (a, b): (math.sqrt((mx-a)**2+(my-b)**2), a, b), zip(x, y)))
+                plt.annotate('X', xy=(mx, my))
+                plt.annotate('tooth' + str(j), xy=(mx+50, my+50))
+                plt.plot([dx, mx], [dy, my]),
+                plt.axis('equal')
+                plt.show()
+
+
 def test_gpa():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
     gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
@@ -14,6 +32,7 @@ def test_gpa():
             plt.plot(x, y, ".")
         x2, y2 = separate_landmarks(mean_landmarks_normalized(gpa_landmarks[i]))
         plt.plot(x2, y2)
+        plt.axis('equal')
         plt.show()
 
 
@@ -70,4 +89,6 @@ def determine_b_parameters():
 
 
 if __name__ == '__main__':
-    determine_b_parameters()
+    test_landmarks_interpretation()
+    # test_gpa()
+    # determine_b_parameters()
