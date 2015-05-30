@@ -5,6 +5,8 @@ import math
 import fnmatch
 import os
 import re
+from scipy.signal import argrelextrema
+import scipy.fftpack
 
 import matplotlib.pyplot as plt
 
@@ -22,7 +24,7 @@ def main():
     cv2.resizeWindow('window', 600, 800)
     original_radiographs = read_radiographs(radiographs_dir)
     pre_processed_radiographs = map(pre_process_radiograph, original_radiographs)
-    map(lambda x: segment_teeth(x, 100), pre_processed_radiographs)
+    map(lambda x: segment_teeth2(x, 100), pre_processed_radiographs)
 
 
 def read_radiographs(radiographs_dir):
@@ -102,16 +104,61 @@ def create_landmarks_data(file_dir):
             landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
     return landmarks_training_data
 
+def segment_teeth2(radiograph, interval):
+    height, width = radiograph.shape
+    hist = []
+    minimal_points = []
+    for e, i in enumerate(range(interval, width, interval)):
+        #generating histogram
+        hist.append([])
+        for j in range(0, height, 1):
+            hist[e].append((np.sum(radiograph[j][i-interval:i+interval+1]), i, j))
+
+        #smoothing
+        w = scipy.fftpack.rfft(map(lambda (intensity, s, t): intensity, hist[e]))
+        w[30:] = 0
+        smoothed = scipy.fftpack.irfft(w)
+        # plt.plot(hist[e])
+        # plt.plot(smoothed)
+        # plt.show()
+        #finding mimima and sort them
+        indices = argrelextrema(smoothed, np.less)[0]
+        minimal_points_width = []
+        for idx in indices:
+            minimal_points_width.append(hist[e][idx])
+        minimal_points_width.sort()
+
+        #keep the best 3 local minima which lie atleast 200 apart from other point
+        count = 0
+        to_keep = []
+        for p in range(len(minimal_points_width)):
+            _, _, d = minimal_points_width[p]
+            add = True
+            for _, _, b in to_keep:
+                if (abs(b-d) < 200 and abs(b-d) != 0) or count >= 3:
+                    add = False
+            if add:
+                count += 1
+                to_keep.append(minimal_points_width[p])
+        minimal_points.extend(to_keep)
+        # minimal_points.extend(minimal_points_width[0:4])
+
+    #plotting
+    for v, x, y in minimal_points:
+        cv2.circle(radiograph, (x, y), 1, 255, 10)
+    cv2.line(radiograph, (400,400),(400,600),255,10)
+    cv2.imshow('window', radiograph)
+    cv2.waitKey()
+
 
 def segment_teeth(radiograph, interval):
     height, width = radiograph.shape
     horizontal_line = [0]*width
     hist = [0]*height
     j = width/2
-    inter = 2*interval
-    for j in range(500,2500,100):
-        for i in range(height):
-            hist[i] += (np.sum(radiograph[i, j-inter:j+inter+1]))
+    inter = interval
+    for i in range(height):
+        hist[i] += (np.sum(radiograph[i, j-inter:j+inter+1]))
     cv2.imshow('window', radiograph)
     plt.plot(hist)
     plt.show()

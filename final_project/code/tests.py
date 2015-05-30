@@ -50,7 +50,7 @@ def determine_b_parameters():
         projection = np.transpose(np.array([eigenvectors[0], eigenvectors[1], eigenvectors[2]]))
         mean_landmarks = mean_landmarks_normalized(gpa_landmarks[i])
         x2, y2 = separate_landmarks(mean_landmarks)
-        x3, y3 = separate_landmarks(normalize_landmarks(landmarks_training_data[i][1]))
+        x3, y3 = separate_landmarks(normalize_landmarks(landmarks_training_data[i][0]))
 
         fig = plt.figure()
         plt.axis('equal')
@@ -89,6 +89,6 @@ def determine_b_parameters():
 
 
 if __name__ == '__main__':
-    test_landmarks_interpretation()
-    # test_gpa()
-    # determine_b_parameters()
+    # test_landmarks_interpretation()
+    test_gpa()
+    determine_b_parameters()
