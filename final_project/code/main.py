@@ -22,9 +22,12 @@ def main():
 
     cv2.namedWindow('window', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('window', 600, 800)
-    original_radiographs = read_radiographs(radiographs_dir)
+    original_radiographs = map(crop_radiograph, read_radiographs(radiographs_dir))
     pre_processed_radiographs = map(pre_process_radiograph, original_radiographs)
-    map(lambda x: segment_teeth2(x, 100), pre_processed_radiographs)
+    map(lambda x: segment_teeth2(x, 50), pre_processed_radiographs)
+    segment = get_segment(pre_processed_radiographs[0], original_radiographs[0])
+    cv2.imshow('window', segment)
+    cv2.waitKey()
 
 
 def read_radiographs(radiographs_dir):
@@ -37,18 +40,18 @@ def read_radiographs(radiographs_dir):
     return radiographs_list
 
 
-def pre_process_radiograph(radiograph, show=False):
-    crop_p = 0.1
+def crop_radiograph(radiograph, percentage=0.1):
+    height, width = radiograph.shape
+    return radiograph[percentage*height:(1-percentage)*height, percentage*width:(1-percentage)*width]
 
-    radiograph = cv2.equalizeHist(radiograph)
+
+def pre_process_radiograph(radiograph, show=False):
+    # radiograph = cv2.equalizeHist(radiograph)
     if show:
         cv2.imshow('window', radiograph)
         cv2.waitKey()
 
-    height, width = radiograph.shape
-    cropped_img = radiograph[crop_p*height:(1-crop_p)*height, crop_p*width:(1-crop_p)*width]
-
-    blur_result = cv2.medianBlur(cropped_img, 17)
+    blur_result = cv2.medianBlur(radiograph, 17)
     blur_result = cv2.GaussianBlur(blur_result, (5, 5), 3)
     if show:
         cv2.imshow('window', blur_result)
@@ -65,7 +68,7 @@ def pre_process_radiograph(radiograph, show=False):
         cv2.imshow('window', dilate_result)
         cv2.waitKey()
 
-    it_thresh_result = iterative_thresholding(cropped_img, dilate_result, 0.8)
+    it_thresh_result = iterative_thresholding(radiograph, dilate_result, 0.8)
     if show:
         cv2.imshow('window', it_thresh_result)
         cv2.waitKey()
@@ -104,23 +107,73 @@ def create_landmarks_data(file_dir):
             landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
     return landmarks_training_data
 
+
+def get_segment(preprocced_radiograph, radiograph):
+    tmp_radiograph = preprocced_radiograph.copy()
+    cv2.imshow('window', tmp_radiograph)
+    clicks = []
+
+    def mouse_event(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONUP:
+            cv2.circle(tmp_radiograph, (x, y), 1, 255, 10)
+            clicks.append((x, y))
+
+    cv2.setMouseCallback('window', mouse_event)
+    while len(clicks) < 4:
+        cv2.imshow('window', tmp_radiograph)
+        cv2.waitKey(20)
+
+    (x, y), (w, h), angle = cv2.minAreaRect(np.array(clicks))
+
+    box = cv2.cv.BoxPoints(((x, y), (w, h), angle))
+    box = np.array(map(lambda (x, y): (np.int(x), np.int(y)), box))
+    cv2.drawContours(tmp_radiograph, [box], 0, 255, 10)
+    cv2.imshow('window', tmp_radiograph)
+    cv2.waitKey()
+
+    if angle < -45:
+        angle += 90
+        tmp = w
+        w = h
+        h = tmp
+
+    m = cv2.getRotationMatrix2D((int(x), int(y)), angle, 1)
+    r_h, r_w = radiograph.shape
+    rotated = cv2.warpAffine(radiograph, m, (r_w, r_h), flags=cv2.INTER_CUBIC)
+
+    return cv2.getRectSubPix(rotated, (int(w), int(h)), (int(x), int(y)))
+
+
 def segment_teeth2(radiograph, interval):
     height, width = radiograph.shape
+    _, mask = cv2.threshold(radiograph, 0, 1, cv2.THRESH_BINARY)
+    # if width % 2 == 0:
+    #     mask = mask[:, :-1]
+    # hist = np.dot(mask, gaussian_filter(300, mask.shape[1]).T)
+    # plt.plot(hist)
+    # plt.figure()
+    # plt.plot(gaussian_filter(300, mask.shape[1]))
+    # plt.show()
+
+
     hist = []
     minimal_points = []
+    if width % 2 == 0:
+        mask = mask[:, :-1]
+    width = mask.shape[1]
+    filter = gaussian_filter(300, width)
+    mask = np.multiply(mask, filter)
     for e, i in enumerate(range(interval, width, interval)):
         #generating histogram
         hist.append([])
         for j in range(0, height, 1):
-            hist[e].append((np.sum(radiograph[j][i-interval:i+interval+1]), i, j))
+            hist[e].append((np.sum(mask[j][i-interval:i+interval+1]), i, j))
 
         #smoothing
         w = scipy.fftpack.rfft(map(lambda (intensity, s, t): intensity, hist[e]))
         w[30:] = 0
         smoothed = scipy.fftpack.irfft(w)
-        # plt.plot(hist[e])
-        # plt.plot(smoothed)
-        # plt.show()
+
         #finding mimima and sort them
         indices = argrelextrema(smoothed, np.less)[0]
         minimal_points_width = []
@@ -135,7 +188,7 @@ def segment_teeth2(radiograph, interval):
             _, _, d = minimal_points_width[p]
             add = True
             for _, _, b in to_keep:
-                if (abs(b-d) < 200 and abs(b-d) != 0) or count >= 3:
+                if (abs(b-d) < 150 and abs(b-d) != 0) or count >= 4:
                     add = False
             if add:
                 count += 1
@@ -143,12 +196,100 @@ def segment_teeth2(radiograph, interval):
         minimal_points.extend(to_keep)
         # minimal_points.extend(minimal_points_width[0:4])
 
+    edges = []
+    for _, x, y in minimal_points:
+        minimal_intensity = 20000000
+        minimal_coords = -1, -1
+        for _, u, v in minimal_points:
+            cache = line_intensity(mask, (x, y), (u, v))
+            if x >= u or cache >= minimal_intensity or abs(v-y) > 0.1*height:
+                continue
+            minimal_intensity = cache
+            minimal_coords = (u, v)
+        if minimal_coords != (-1, -1):
+            edges.append(((x, y), (minimal_coords[0], minimal_coords[1])))
+
+    paths = []
+    for edge in edges:
+        new_path = True
+        for path in paths:
+            if path[-1] == edge[0]:
+                new_path = False
+                path.append(edge[1])
+        if new_path:
+            paths.append([edge[0], edge[1]])
+
+    #paths = map(lambda x: trim_path(mask, x), paths)
+    paths = remove_short_paths(paths, width, 0.3)
+    # paths = filter(lambda x: x[len(x)/2][1] >= height/2, paths)
+    best_path = sorted(map(lambda x: (path_intensity(mask, x)/(path_length(x)), x), paths))[0][1]
+    draw_path(radiograph, best_path)
+    map(lambda x: draw_path(radiograph, x), paths)
+
     #plotting
     for v, x, y in minimal_points:
         cv2.circle(radiograph, (x, y), 1, 255, 10)
-    cv2.line(radiograph, (400,400),(400,600),255,10)
     cv2.imshow('window', radiograph)
     cv2.waitKey()
+
+
+def path_intensity(radiograph, path):
+    prev = path[0]
+    intensity = 0
+    for i in range(1, len(path)):
+        intensity += line_intensity(radiograph, prev, path[i])
+        prev = path[i]
+    return intensity
+
+
+def line_intensity(radiograph, p1, p2):
+    li = cv.InitLineIterator(cv.fromarray(radiograph), p1, p2)
+    intensity = 0
+    for i in li:
+        intensity += i
+    return intensity
+
+
+def remove_short_paths(paths, width, ratio):
+    minimal_length = width*ratio
+    to_keep = []
+    for path in paths:
+        length = path_length(path)
+        if length >= minimal_length:
+            to_keep.append(path)
+    return to_keep
+
+
+def path_length(path):
+    prev = path[0]
+    length = 0
+    for i in range(1, len(path)):
+        length += math.sqrt((prev[0]-path[i][0])**2+(prev[1]-path[i][1])**2)
+        prev = path[i]
+    return length
+
+
+def trim_path(radiograph, path):
+    mean_intensity = path_intensity(radiograph, path)/path_length(path)
+    prev = path[0]
+    while len(path) > 2:
+        if mean_intensity < line_intensity(radiograph, path[0], path[1]):
+            del(path[0])
+        else:
+            break
+    while len(path) > 2:
+        if mean_intensity < line_intensity(radiograph, path[-1], path[-2]):
+            del(path[-1])
+        else:
+            break
+    return path
+
+
+def draw_path(radiograph, path):
+    prev = path[0]
+    for i in range(1, len(path)):
+        cv2.line(radiograph, prev, path[i], 255-path_intensity(radiograph, path)/path_length(path), 5)
+        prev = path[i]
 
 
 def segment_teeth(radiograph, interval):
@@ -169,7 +310,6 @@ def segment_teeth(radiograph, interval):
     #     cv2.imshow('window', radiograph)
     #     plt.plot(hist)
     #     plt.show()
-
 
 
 def parse_landmarks_file(file_name, file_dir):
@@ -369,6 +509,40 @@ def pca(X, num_components=0):
     eigenvalues = eigenvalues[0:num_components].copy()
     eigenvectors = eigenvectors[:, 0:num_components].copy()
     return [eigenvalues, eigenvectors, mu]
+
+
+def gaussian_function(sigma, u):
+    return 1/(math.sqrt(2*math.pi)*sigma)*math.e**-(u**2/(2*sigma**2))
+
+
+def gaussian_filter(sigma, filter_length=None):
+    '''
+    Given a sigma, return a 1-D Gaussian filter.
+    @param     sigma:         float, defining the width of the filter
+    @param     filter_length: optional, the length of the filter, has to be odd
+    @return    A 1-D numpy array of odd length,
+               containing the symmetric, discrete approximation of a Gaussian with sigma
+               Summation of the array-values must be equal to one.
+    '''
+    if filter_length is None:
+        #determine the length of the filter
+        filter_length = math.ceil(sigma*5)
+        #make the length odd
+        filter_length = 2*(int(filter_length)/2) + 1
+
+    #make sure sigma is a float
+    sigma = float(sigma)
+
+    #create the filter
+    result = np.zeros(filter_length)
+
+    #do your best!
+    result = np.asarray(map(lambda u: gaussian_function(sigma, u), range(-(filter_length/2), filter_length/2 + 1, 1)))
+
+    result = result / result.sum()
+
+    #return the filter
+    return result
 
 
 if __name__ == '__main__':
