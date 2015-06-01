@@ -23,6 +23,7 @@ def main():
     cv2.namedWindow('window', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('window', 600, 800)
     original_radiographs = map(crop_radiograph, read_radiographs(radiographs_dir))
+    # pre_process_radiograph(original_radiographs[2], show=True)
     pre_processed_radiographs = map(pre_process_radiograph, original_radiographs)
     map(lambda x: segment_teeth2(x, 50), pre_processed_radiographs)
     segment = get_segment(pre_processed_radiographs[0], original_radiographs[0])
@@ -73,7 +74,7 @@ def pre_process_radiograph(radiograph, show=False):
         cv2.imshow('window', it_thresh_result)
         cv2.waitKey()
 
-    ad_thresh_result = cv2.adaptiveThreshold(it_thresh_result, 255, cv.CV_ADAPTIVE_THRESH_MEAN_C, cv.CV_THRESH_BINARY, 151, 10)
+    ad_thresh_result = cv2.adaptiveThreshold(it_thresh_result, 255, cv.CV_ADAPTIVE_THRESH_MEAN_C, cv.CV_THRESH_BINARY, 301, 10)
     if show:
         cv2.imshow('window', ad_thresh_result)
         cv2.waitKey()
@@ -147,22 +148,18 @@ def get_segment(preprocced_radiograph, radiograph):
 def segment_teeth2(radiograph, interval):
     height, width = radiograph.shape
     _, mask = cv2.threshold(radiograph, 0, 1, cv2.THRESH_BINARY)
-    # if width % 2 == 0:
-    #     mask = mask[:, :-1]
-    # hist = np.dot(mask, gaussian_filter(300, mask.shape[1]).T)
-    # plt.plot(hist)
-    # plt.figure()
-    # plt.plot(gaussian_filter(300, mask.shape[1]))
-    # plt.show()
-
+    mask = 255-radiograph
 
     hist = []
     minimal_points = []
     if width % 2 == 0:
         mask = mask[:, :-1]
     width = mask.shape[1]
-    filter = gaussian_filter(300, width)
+    filter = gaussian_filter(450, width)
     mask = np.multiply(mask, filter)
+    mask2 = mask * (255/mask.max())
+    mask2 = mask2.astype('uint8')
+
     for e, i in enumerate(range(interval, width, interval)):
         #generating histogram
         hist.append([])
@@ -175,11 +172,11 @@ def segment_teeth2(radiograph, interval):
         smoothed = scipy.fftpack.irfft(w)
 
         #finding mimima and sort them
-        indices = argrelextrema(smoothed, np.less)[0]
+        indices = argrelextrema(smoothed, np.greater)[0]
         minimal_points_width = []
         for idx in indices:
             minimal_points_width.append(hist[e][idx])
-        minimal_points_width.sort()
+        minimal_points_width.sort(reverse=True)
 
         #keep the best 3 local minima which lie atleast 200 apart from other point
         count = 0
@@ -219,17 +216,19 @@ def segment_teeth2(radiograph, interval):
         if new_path:
             paths.append([edge[0], edge[1]])
 
-    #paths = map(lambda x: trim_path(mask, x), paths)
+    draw_image = radiograph.copy()
+
+    paths = map(lambda x: trim_path(mask2, x), paths)
     paths = remove_short_paths(paths, width, 0.3)
-    # paths = filter(lambda x: x[len(x)/2][1] >= height/2, paths)
-    best_path = sorted(map(lambda x: (path_intensity(mask, x)/(path_length(x)), x), paths))[0][1]
-    draw_path(radiograph, best_path)
-    map(lambda x: draw_path(radiograph, x), paths)
+    best_path = sorted(map(lambda x: (path_intensity(radiograph, x)/(path_length(x)), x), paths))[0][1]
+    map(lambda x: draw_path(draw_image, x, color=150), paths)
+    map(lambda x: cv2.putText(draw_image, str(int(path_intensity(radiograph, x)/(path_length(x)))), x[0], cv.CV_FONT_HERSHEY_PLAIN, 5, 255), paths)
+    draw_path(draw_image, best_path)
 
     #plotting
     for v, x, y in minimal_points:
-        cv2.circle(radiograph, (x, y), 1, 255, 10)
-    cv2.imshow('window', radiograph)
+        cv2.circle(draw_image, (x, y), 1, 150, 10)
+    cv2.imshow('window', draw_image)
     cv2.waitKey()
 
 
@@ -271,24 +270,23 @@ def path_length(path):
 
 def trim_path(radiograph, path):
     mean_intensity = path_intensity(radiograph, path)/path_length(path)
-    prev = path[0]
     while len(path) > 2:
-        if mean_intensity < line_intensity(radiograph, path[0], path[1]):
+        if mean_intensity > line_intensity(radiograph, path[0], path[1])/path_length([path[0], path[1]]):
             del(path[0])
         else:
             break
     while len(path) > 2:
-        if mean_intensity < line_intensity(radiograph, path[-1], path[-2]):
+        if mean_intensity > line_intensity(radiograph, path[-1], path[-2])/path_length([path[-1], path[-2]]):
             del(path[-1])
         else:
             break
     return path
 
 
-def draw_path(radiograph, path):
+def draw_path(radiograph, path, color=255):
     prev = path[0]
     for i in range(1, len(path)):
-        cv2.line(radiograph, prev, path[i], 255-path_intensity(radiograph, path)/path_length(path), 5)
+        cv2.line(radiograph, prev, path[i], color, 5)
         prev = path[i]
 
 
