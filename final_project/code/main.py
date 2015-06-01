@@ -16,19 +16,23 @@ radiographs_dir = "../data/Radiographs/"
 
 
 def main():
-    landmarks_training_data = create_landmarks_data(landmarks_dir)
-    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
-    pca_result = map(lambda x: pca(np.array(x)), gpa_landmarks)
-
     cv2.namedWindow('window', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('window', 600, 800)
     original_radiographs = map(crop_radiograph, read_radiographs(radiographs_dir))
-    # pre_process_radiograph(original_radiographs[2], show=True)
+
     pre_processed_radiographs = map(pre_process_radiograph, original_radiographs)
-    map(lambda x: segment_teeth2(x, 50), pre_processed_radiographs)
+    # map(lambda x: segment_teeth(x, 50), pre_processed_radiographs)
     segment = get_segment(pre_processed_radiographs[0], original_radiographs[0])
     cv2.imshow('window', segment)
     cv2.waitKey()
+
+    landmarks_training_data = create_landmarks_data(landmarks_dir)
+    models = get_models(landmarks_training_data)
+    fit_model(models[0], segment)
+
+# =====================================================
+#            RADIOGRAPHS
+# =====================================================
 
 
 def read_radiographs(radiographs_dir):
@@ -99,14 +103,67 @@ def iterative_thresholding(radiograph, mask, teeth_pref=0.5):
     return cv2.threshold(radiograph, threshold, 1, cv2.THRESH_TOZERO)[1]
 
 
-def create_landmarks_data(file_dir):
-    landmarks_training_data = [[0]*(len(os.listdir(file_dir))/8) for _ in range(0, 8)]
-    for file_name in sorted(os.listdir(file_dir)):
-        if fnmatch.fnmatch(file_name, '*.txt'):
-            incisor_landmarks = parse_landmarks_file(file_name, file_dir)
-            match = re.match(".*?(\d+)-(\d+)\.txt", file_name)
-            landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
-    return landmarks_training_data
+def path_intensity(radiograph, path):
+    prev = path[0]
+    intensity = 0
+    for i in range(1, len(path)):
+        intensity += line_intensity(radiograph, prev, path[i])
+        prev = path[i]
+    return intensity
+
+
+def line_intensity(radiograph, p1, p2):
+    li = cv.InitLineIterator(cv.fromarray(radiograph), p1, p2)
+    intensity = 0
+    for i in li:
+        intensity += i
+    return intensity
+
+
+def remove_short_paths(paths, width, ratio):
+    minimal_length = width*ratio
+    to_keep = []
+    for path in paths:
+        length = path_length(path)
+        if length >= minimal_length:
+            to_keep.append(path)
+    return to_keep
+
+
+def path_length(path):
+    prev = path[0]
+    length = 0
+    for i in range(1, len(path)):
+        length += math.sqrt((prev[0]-path[i][0])**2+(prev[1]-path[i][1])**2)
+        prev = path[i]
+    return length
+
+
+def trim_path(radiograph, path):
+    mean_intensity = path_intensity(radiograph, path)/path_length(path)
+    while len(path) > 2:
+        if mean_intensity > line_intensity(radiograph, path[0], path[1])/path_length([path[0], path[1]]):
+            del(path[0])
+        else:
+            break
+    while len(path) > 2:
+        if mean_intensity > line_intensity(radiograph, path[-1], path[-2])/path_length([path[-1], path[-2]]):
+            del(path[-1])
+        else:
+            break
+    return path
+
+
+def draw_path(radiograph, path, color=255):
+    prev = path[0]
+    for i in range(1, len(path)):
+        cv2.line(radiograph, prev, path[i], color, 5)
+        prev = path[i]
+
+
+# =====================================================
+#            SEGMENT
+# =====================================================
 
 
 def get_segment(preprocced_radiograph, radiograph):
@@ -145,7 +202,7 @@ def get_segment(preprocced_radiograph, radiograph):
     return cv2.getRectSubPix(rotated, (int(w), int(h)), (int(x), int(y)))
 
 
-def segment_teeth2(radiograph, interval):
+def segment_teeth(radiograph, interval):
     height, width = radiograph.shape
     _, mask = cv2.threshold(radiograph, 0, 1, cv2.THRESH_BINARY)
     mask = 255-radiograph
@@ -232,82 +289,109 @@ def segment_teeth2(radiograph, interval):
     cv2.waitKey()
 
 
-def path_intensity(radiograph, path):
-    prev = path[0]
-    intensity = 0
-    for i in range(1, len(path)):
-        intensity += line_intensity(radiograph, prev, path[i])
-        prev = path[i]
-    return intensity
+def gaussian_function(sigma, u):
+    return 1/(math.sqrt(2*math.pi)*sigma)*math.e**-(u**2/(2*sigma**2))
 
 
-def line_intensity(radiograph, p1, p2):
-    li = cv.InitLineIterator(cv.fromarray(radiograph), p1, p2)
-    intensity = 0
-    for i in li:
-        intensity += i
-    return intensity
+def gaussian_filter(sigma, filter_length=None):
+    '''
+    Given a sigma, return a 1-D Gaussian filter.
+    @param     sigma:         float, defining the width of the filter
+    @param     filter_length: optional, the length of the filter, has to be odd
+    @return    A 1-D numpy array of odd length,
+               containing the symmetric, discrete approximation of a Gaussian with sigma
+               Summation of the array-values must be equal to one.
+    '''
+    if filter_length is None:
+        #determine the length of the filter
+        filter_length = math.ceil(sigma*5)
+        #make the length odd
+        filter_length = 2*(int(filter_length)/2) + 1
+
+    #make sure sigma is a float
+    sigma = float(sigma)
+
+    #create the filter
+    result = np.zeros(filter_length)
+
+    #do your best!
+    result = np.asarray(map(lambda u: gaussian_function(sigma, u), range(-(filter_length/2), filter_length/2 + 1, 1)))
+
+    result = result / result.sum()
+
+    #return the filter
+    return result
 
 
-def remove_short_paths(paths, width, ratio):
-    minimal_length = width*ratio
-    to_keep = []
-    for path in paths:
-        length = path_length(path)
-        if length >= minimal_length:
-            to_keep.append(path)
-    return to_keep
+# =====================================================
+#            MODEL
+# =====================================================
 
 
-def path_length(path):
-    prev = path[0]
-    length = 0
-    for i in range(1, len(path)):
-        length += math.sqrt((prev[0]-path[i][0])**2+(prev[1]-path[i][1])**2)
-        prev = path[i]
-    return length
+def get_models(landmarks_training_data):
+    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
+    models = []
+    for tooth_landmarks in gpa_landmarks:
+        _, eigenvectors, _ = pca(np.array(tooth_landmarks))
+        eigenvectors = np.transpose(eigenvectors)
+        projection = np.transpose(np.array([eigenvectors[0], eigenvectors[1], eigenvectors[2]]))
+        mean_landmarks = mean_landmarks_normalized(tooth_landmarks)
+        models.append((mean_landmarks, projection))
+    return models
 
 
-def trim_path(radiograph, path):
-    mean_intensity = path_intensity(radiograph, path)/path_length(path)
-    while len(path) > 2:
-        if mean_intensity > line_intensity(radiograph, path[0], path[1])/path_length([path[0], path[1]]):
-            del(path[0])
-        else:
-            break
-    while len(path) > 2:
-        if mean_intensity > line_intensity(radiograph, path[-1], path[-2])/path_length([path[-1], path[-2]]):
-            del(path[-1])
-        else:
-            break
-    return path
+def fit_model(model, segment):
+    fitted_model = initial_fit_model(model, segment)
+
+    fitted_model = get_projected_landmarks(fitted_model, segment)
 
 
-def draw_path(radiograph, path, color=255):
-    prev = path[0]
-    for i in range(1, len(path)):
-        cv2.line(radiograph, prev, path[i], color, 5)
-        prev = path[i]
+
+def initial_fit_model(model, segment, ratio_width=0.4):
+    height, width = segment.shape
+    model = model[0].copy()
+
+    x_model_coords, _ = separate_landmarks(model)
+    left_most, right_most = x_model_coords.min(), x_model_coords.max()
+    s = abs(left_most - right_most)/(ratio_width*width)
+    model = scale_landmarks(model, s)
+    _, y_model_coords = separate_landmarks(model)
+    return translate_landmarks(model, (width/2, height-ratio_width*width/2-abs(y_model_coords.min())))
 
 
-def segment_teeth(radiograph, interval):
-    height, width = radiograph.shape
-    horizontal_line = [0]*width
-    hist = [0]*height
-    j = width/2
-    inter = interval
-    for i in range(height):
-        hist[i] += (np.sum(radiograph[i, j-inter:j+inter+1]))
-    cv2.imshow('window', radiograph)
-    plt.plot(hist)
-    plt.show()
-    # for j in range(width/2, width-interval, 50):
-    #     hist = [0]*height
-    #     for i in range(height):
-    #         hist[i] = (np.sum(radiograph[i, j-interval:j+interval+1])+(abs(height/2-i)))
-    #     cv2.imshow('window', radiograph)
-    #     plt.plot(hist)
-    #     plt.show()
+def get_projected_landmarks(fitted_model, segment):
+    projected_landmarks = []
+    for i in range(0, len(fitted_model), 2):
+        get_new_landmark_location((fitted_model[i-2], fitted_model[i-1]),
+                                  (fitted_model[i], fitted_model[i+1]),
+                                  (fitted_model[i+2], fitted_model[i+3]),
+                                  segment)
+
+    return projected_landmarks
+
+
+def get_new_landmark_location(prev, cur, next, segment, search_ratio=0.1):
+    height, width = segment.shape
+    rico = -float(next[1]-prev[1])/float(next[0]-prev[0])
+    eq = lambda x: rico*(x-cur[0])+cur[1]
+
+    hist = []
+    for x in range(cur[0]-search_ratio*width, cur[0]+search_ratio*width):
+        y = int(eq(x))
+        x = int(x)
+        if 0 < y < height and 0 < x < width:
+            hist.append(segment[x, y])
+    # todo find edge
+
+
+def create_landmarks_data(file_dir):
+    landmarks_training_data = [[0]*(len(os.listdir(file_dir))/8) for _ in range(0, 8)]
+    for file_name in sorted(os.listdir(file_dir)):
+        if fnmatch.fnmatch(file_name, '*.txt'):
+            incisor_landmarks = parse_landmarks_file(file_name, file_dir)
+            match = re.match(".*?(\d+)-(\d+)\.txt", file_name)
+            landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
+    return landmarks_training_data
 
 
 def parse_landmarks_file(file_name, file_dir):
@@ -418,14 +502,14 @@ def translate_landmarks(landmarks, origin):
     return np.array(translated_landmarks)
 
 
-def scale_landmarks(landmarks):
+def scale_landmarks(landmarks, s=None):
     """
     Scales the given landmark vector so that the root mean squared distance is equal to 1
     """
     x_landmarks, y_landmarks = separate_landmarks(landmarks)
     mean_x, mean_y = get_mean_landmarks(landmarks)
-
-    s = np.sqrt((np.sum((x_landmarks - mean_x)**2) + np.sum((y_landmarks - mean_y)**2)) / len(x_landmarks))
+    if s is None:
+        s = np.sqrt((np.sum((x_landmarks - mean_x)**2) + np.sum((y_landmarks - mean_y)**2)) / len(x_landmarks))
 
     scaled_landmarks = []
     for i, landmark in enumerate(landmarks):
@@ -507,40 +591,6 @@ def pca(X, num_components=0):
     eigenvalues = eigenvalues[0:num_components].copy()
     eigenvectors = eigenvectors[:, 0:num_components].copy()
     return [eigenvalues, eigenvectors, mu]
-
-
-def gaussian_function(sigma, u):
-    return 1/(math.sqrt(2*math.pi)*sigma)*math.e**-(u**2/(2*sigma**2))
-
-
-def gaussian_filter(sigma, filter_length=None):
-    '''
-    Given a sigma, return a 1-D Gaussian filter.
-    @param     sigma:         float, defining the width of the filter
-    @param     filter_length: optional, the length of the filter, has to be odd
-    @return    A 1-D numpy array of odd length,
-               containing the symmetric, discrete approximation of a Gaussian with sigma
-               Summation of the array-values must be equal to one.
-    '''
-    if filter_length is None:
-        #determine the length of the filter
-        filter_length = math.ceil(sigma*5)
-        #make the length odd
-        filter_length = 2*(int(filter_length)/2) + 1
-
-    #make sure sigma is a float
-    sigma = float(sigma)
-
-    #create the filter
-    result = np.zeros(filter_length)
-
-    #do your best!
-    result = np.asarray(map(lambda u: gaussian_function(sigma, u), range(-(filter_length/2), filter_length/2 + 1, 1)))
-
-    result = result / result.sum()
-
-    #return the filter
-    return result
 
 
 if __name__ == '__main__':
