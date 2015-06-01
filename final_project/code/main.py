@@ -28,8 +28,8 @@ def main():
 
     landmarks_training_data = create_landmarks_data(landmarks_dir)
     #TODO
-    landmarks_neigbourhoods = map(lambda x: learn_landmark_neighbourhood(x, original_radiographs),
-                                  landmarks_training_data)
+    #landmarks_neigbourhoods = map(lambda x: learn_landmark_neighbourhood(x, original_radiographs),
+    #                              landmarks_training_data)
     models = get_models(landmarks_training_data)
     fit_model(models[0], segment)
 
@@ -346,8 +346,17 @@ def get_models(landmarks_training_data):
 def fit_model(model, segment):
     fitted_model = initial_fit_model(model, segment)
 
+    show_model(fitted_model, segment)
     fitted_model = get_projected_landmarks(fitted_model, segment)
+    show_model(fitted_model, segment)
 
+
+def show_model(model, segment):
+    segment = segment.copy()
+    for i in range(0, len(model), 2):
+        cv2.circle(segment, (int(model[i]), int(model[i+1])), 1, 255)
+    cv2.imshow('window', segment)
+    cv2.waitKey()
 
 
 def initial_fit_model(model, segment, ratio_width=0.4):
@@ -384,7 +393,14 @@ def get_new_landmark_location(prev, cur, next, segment, search_ratio=0.1):
         x = int(x)
         if 0 < y < height and 0 < x < width:
             hist.append(segment[y, x])
-    # todo find edge
+
+    cv2.line(segment, (int(cur[0]-search_ratio*width), int(eq(cur[0]-search_ratio*width))),
+             (int(cur[0]+search_ratio*width), int(eq(cur[0]+search_ratio*width))), 255)
+    cv2.circle(segment, (int(cur[0]), int(cur[1])), 1, 0)
+    cv2.imshow('window', segment)
+    cv2.waitKey()
+    plt.plot(hist)
+    plt.show()
 
 
 def create_landmarks_data(file_dir):
