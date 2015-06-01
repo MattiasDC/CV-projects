@@ -27,6 +27,9 @@ def main():
     cv2.waitKey()
 
     landmarks_training_data = create_landmarks_data(landmarks_dir)
+    #TODO
+    landmarks_neigbourhoods = map(lambda x: learn_landmark_neighbourhood(x, original_radiographs),
+                                  landmarks_training_data)
     models = get_models(landmarks_training_data)
     fit_model(models[0], segment)
 
@@ -273,7 +276,7 @@ def segment_teeth(radiograph, interval):
         if new_path:
             paths.append([edge[0], edge[1]])
 
-    draw_image = radiograph.copy()
+    draw_image = mask2.copy()
 
     paths = map(lambda x: trim_path(mask2, x), paths)
     paths = remove_short_paths(paths, width, 0.3)
@@ -364,7 +367,7 @@ def get_projected_landmarks(fitted_model, segment):
     for i in range(0, len(fitted_model), 2):
         get_new_landmark_location((fitted_model[i-2], fitted_model[i-1]),
                                   (fitted_model[i], fitted_model[i+1]),
-                                  (fitted_model[i+2], fitted_model[i+3]),
+                                  (fitted_model[(i+2) % len(fitted_model)], fitted_model[i+3] % len(fitted_model)),
                                   segment)
 
     return projected_landmarks
@@ -376,11 +379,11 @@ def get_new_landmark_location(prev, cur, next, segment, search_ratio=0.1):
     eq = lambda x: rico*(x-cur[0])+cur[1]
 
     hist = []
-    for x in range(cur[0]-search_ratio*width, cur[0]+search_ratio*width):
+    for x in range(int(cur[0]-search_ratio*width), int(cur[0]+search_ratio*width)):
         y = int(eq(x))
         x = int(x)
         if 0 < y < height and 0 < x < width:
-            hist.append(segment[x, y])
+            hist.append(segment[y, x])
     # todo find edge
 
 
