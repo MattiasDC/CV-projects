@@ -7,18 +7,19 @@ import os
 import re
 from scipy.signal import argrelextrema
 import scipy.fftpack
-from ctypes import *
 import matplotlib.pyplot as plt
 
 
+# Directories
 landmarks_dir = "../data/Landmarks/original/"
 radiographs_dir = "../data/Radiographs/"
+
 # Precision procrustes
-eps = 10**-14
+eps = 10**-12
 
 # Parameters for mapping model points to segment
-locality_search = 25
-wide_search = 40
+locality_search = 10
+wide_search = 15
 
 
 def main():
@@ -365,11 +366,12 @@ def pre_process_for_landmarks(radiograph, show=False):
     Pre-processes the given radiograph before learning for the landmarks and fitting models
     """
     # TODO improve
-    blur_result = cv2.medianBlur(radiograph, 5)
+    blur_result = cv2.medianBlur(radiograph, 3)
+    hist_result = cv2.equalizeHist(blur_result)
     if show:
-        cv2.imshow('window', blur_result)
+        cv2.imshow('window', hist_result)
         cv2.waitKey()
-    return blur_result
+    return hist_result
 
 
 def get_models(landmarks_training_data):
@@ -388,10 +390,13 @@ def fit_model(model, landmarks_neighbourhood, segment):
     """
     Fits the given model using an iterative method and returns the vector needed to project the model to the image
     """
+    # TODO break when b parameters are violated
     landmarks_segment = initial_fit_model(model, segment)
     vector = (0, 0, 0)
+    count = 0
     # landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, segment, show=True)
     while True:
+        prev = vector
         while True:
             prev_vector = vector
             fitted_model = model[0] + np.dot(model[1], vector)
@@ -401,17 +406,16 @@ def fit_model(model, landmarks_neighbourhood, segment):
             fitted_landmarks, _ = translate_landmarks(landmarks_segment, transform_params[0])
             fitted_landmarks, _ = scale_landmarks(fitted_landmarks, transform_params[1])
             fitted_landmarks = rotate_landmarks(fitted_landmarks, transform_params[2])
-            # fitted_landmarks = np.divide(fitted_landmarks, np.multiply(fitted_landmarks, model[0]))
+            # fitted_landmarks = np.divide(fitted_landmarks, np.multiply(fitted_landmarks, model[0])) # TODO
             vector = np.dot(model[1].T, (normalize_landmarks(fitted_landmarks) - model[0]))
             if np.sum(abs(vector - prev_vector)) < eps:
                 break
-        prev = landmarks_segment
         _, s = scale_landmarks(landmarks_segment)
         landmarks_segment, _ = procrustes_analysis(landmarks_segment, model[0] + np.dot(model[1], vector), 1/s)
-        landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, segment, show=True)
-        print rmse(np.array(prev), np.array(landmarks_segment))
-        if rmse(np.array(prev), np.array(landmarks_segment)) < eps:
+        landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, segment)
+        if np.sum(abs(vector - prev)) < eps and count > 1:
             break
+        count += 1
     show_model(landmarks_segment, segment)
     return vector
 
@@ -424,7 +428,7 @@ def show_model(model, segment, color=255):
     cv2.waitKey()
 
 
-def initial_fit_model(model, segment, ratio_width=0.4):
+def initial_fit_model(model, segment, ratio_width=0.6):
     """
     Returns an initial fit of the model to the segment
     """
