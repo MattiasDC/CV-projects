@@ -7,31 +7,37 @@ import os
 import re
 from scipy.signal import argrelextrema
 import scipy.fftpack
-
+from ctypes import *
 import matplotlib.pyplot as plt
 
 
 landmarks_dir = "../data/Landmarks/original/"
 radiographs_dir = "../data/Radiographs/"
+# Precision procrustes
+eps = 10**-14
+
+# Parameters for mapping model points to segment
+locality_search = 15
+wide_search = 20
 
 
 def main():
     cv2.namedWindow('window', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('window', 600, 800)
-    original_radiographs = map(crop_radiograph, read_radiographs(radiographs_dir))
+    original_radiographs = read_radiographs(radiographs_dir)
+    cropped_radiographs = map(crop_radiograph, original_radiographs)
 
-    pre_processed_radiographs = map(pre_process_radiograph, original_radiographs)
+    pre_processed_radiographs = map(pre_process_radiograph, cropped_radiographs)
     # map(lambda x: segment_teeth(x, 50), pre_processed_radiographs)
-    segment = get_segment(pre_processed_radiographs[0], original_radiographs[0])
+    segment = get_segment(pre_processed_radiographs[0], cropped_radiographs[0])
     cv2.imshow('window', segment)
     cv2.waitKey()
 
     landmarks_training_data = create_landmarks_data(landmarks_dir)
-    #TODO
-    #landmarks_neigbourhoods = map(lambda x: learn_landmark_neighbourhood(x, original_radiographs),
-    #                              landmarks_training_data)
+    landmarks_neigbourhoods = map(lambda x: learn_landmark_neighbourhood(x, original_radiographs),
+                                  landmarks_training_data)
     models = get_models(landmarks_training_data)
-    fit_model(models[0], segment)
+    fit_model(models[0], landmarks_neigbourhoods[0], segment)
 
 # =====================================================
 #            RADIOGRAPHS
@@ -343,12 +349,13 @@ def get_models(landmarks_training_data):
     return models
 
 
-def fit_model(model, segment):
+def fit_model(model, landmarks_neighbourhood, segment):
     fitted_model = initial_fit_model(model, segment)
 
     show_model(fitted_model, segment)
-    fitted_model = get_projected_landmarks(fitted_model, segment)
+    fitted_model = get_projected_landmarks(fitted_model, landmarks_neighbourhood, segment)
     show_model(fitted_model, segment)
+    # Procrustes
 
 
 def show_model(model, segment):
@@ -371,36 +378,66 @@ def initial_fit_model(model, segment, ratio_width=0.4):
     return translate_landmarks(model, (width/2, height-ratio_width*width/2-abs(y_model_coords.min())))
 
 
-def get_projected_landmarks(fitted_model, segment):
+def get_projected_landmarks(fitted_model, landmarks_neighbourhood, segment):
     projected_landmarks = []
     for i in range(0, len(fitted_model), 2):
-        get_new_landmark_location((fitted_model[i-2], fitted_model[i-1]),
-                                  (fitted_model[i], fitted_model[i+1]),
-                                  (fitted_model[(i+2) % len(fitted_model)], fitted_model[i+3] % len(fitted_model)),
-                                  segment)
-
+        cost_function = lambda x: np.dot(np.dot((x - landmarks_neighbourhood[i/2][0]), landmarks_neighbourhood[i/2][1]),
+                                  (x - landmarks_neighbourhood[i/2][0])[np.newaxis].T)
+        intensity_vector, normal_vector = get_normal_vector_intensity((fitted_model[i-2], fitted_model[i-1]),
+                                                                      (fitted_model[i], fitted_model[i+1]),
+                                                                      (fitted_model[(i+2) % len(fitted_model)],
+                                                                       fitted_model[(i+3) % len(fitted_model)]),
+                                                                      segment, wide_search, show=True)
+        min_cost = float('inf')
+        points = (fitted_model[i], fitted_model[i+1])
+        for j in range(0, intensity_vector.size-landmarks_neighbourhood[i/2][0].size):
+            fit_intensity_vector = intensity_vector[j:j+landmarks_neighbourhood[i/2][0].size]
+            print (fit_intensity_vector - landmarks_neighbourhood[i/2][0])[np.newaxis].T.shape
+            print landmarks_neighbourhood[i/2][1].shape
+            cost = cost_function(fit_intensity_vector)
+            print cost
+            if cost > min_cost:
+                cost = min_cost
+                points = normal_vector[j]
+        projected_landmarks.append(points[0])
+        projected_landmarks.append(points[1])
     return projected_landmarks
 
 
-def get_new_landmark_location(prev, cur, next, segment, search_ratio=0.1):
+def get_normal_vector_intensity(prev, cur, next, segment, search_length, show=False):
     height, width = segment.shape
-    rico = -float(next[1]-prev[1])/float(next[0]-prev[0])
+    if next[1] != prev[1]:
+        rico = -float(next[0]-prev[0])/float(next[1]-prev[1])
+    else:
+        rico = 10000
     eq = lambda x: rico*(x-cur[0])+cur[1]
 
+    min_x = int(cur[0]-search_length-1)
+    max_x = int(math.ceil(cur[0]+search_length+1))
+    min_y = int(eq(min_x))
+    max_y = int(math.ceil(eq(max_x)))
+
+    line_points = bresenham_march(segment, (min_x, min_y), (max_x, max_y))
+
+    diff = float(len(line_points)) - (2*search_length + 1)
+    line_points = line_points[int(diff/2):len(line_points)-int(math.ceil(diff/2))]
+
     hist = []
-    for x in range(int(cur[0]-search_ratio*width), int(cur[0]+search_ratio*width)):
-        y = int(eq(x))
-        x = int(x)
+    normal_vector = []
+    for x, y in line_points:
         if 0 < y < height and 0 < x < width:
             hist.append(segment[y, x])
+            normal_vector.append((y, x))
+        else:
+            hist.append(0)
+            normal_vector.append((y, x))
 
-    cv2.line(segment, (int(cur[0]-search_ratio*width), int(eq(cur[0]-search_ratio*width))),
-             (int(cur[0]+search_ratio*width), int(eq(cur[0]+search_ratio*width))), 255)
-    cv2.circle(segment, (int(cur[0]), int(cur[1])), 1, 0)
-    cv2.imshow('window', segment)
-    cv2.waitKey()
-    plt.plot(hist)
-    plt.show()
+    if show:
+        cv2.line(segment, line_points[0], line_points[-1], 255)
+        cv2.circle(segment, (int(cur[0]), int(cur[1])), 1, 0)
+        cv2.imshow('window', segment)
+        cv2.waitKey()
+    return np.array(hist), normal_vector
 
 
 def create_landmarks_data(file_dir):
@@ -411,6 +448,22 @@ def create_landmarks_data(file_dir):
             match = re.match(".*?(\d+)-(\d+)\.txt", file_name)
             landmarks_training_data[int(match.group(2))-1][int(match.group(1))-1] = incisor_landmarks
     return landmarks_training_data
+
+
+def learn_landmark_neighbourhood(landmarks, radiographs):
+    landmark_point_local_models = []
+    for i in range(0, len(landmarks[0]), 2):
+        intensity_vector_list = []
+        for j, radiograph in enumerate(radiographs):
+            intensity_vector, _ = get_normal_vector_intensity((landmarks[j][i-2], landmarks[j][i-1]),
+                                                              (landmarks[j][i], landmarks[j][i+1]),
+                                                              (landmarks[j][(i+2) % len(landmarks)],
+                                                              landmarks[j][(i+3) % len(landmarks)]),
+                                                              radiograph, locality_search)
+            intensity_vector_list.append(intensity_vector.astype('float64')/np.sum(np.absolute(intensity_vector)))
+        intensity_vector_list = np.array(intensity_vector_list)
+        landmark_point_local_models.append((mean_landmarks_normalized(intensity_vector_list), np.cov(intensity_vector_list.T)**-1))
+    return landmark_point_local_models
 
 
 def parse_landmarks_file(file_name, file_dir):
@@ -610,6 +663,67 @@ def pca(X, num_components=0):
     eigenvalues = eigenvalues[0:num_components].copy()
     eigenvectors = eigenvectors[:, 0:num_components].copy()
     return [eigenvalues, eigenvectors, mu]
+
+
+def bresenham_march(img, p1, p2):
+    """
+    Alternative for cv.InitLineIterator that returns the positions
+    Source: http://answers.ros.org/question/10160/opencv-python-lineiterator-returning-position-information/
+    """
+    x1 = p1[0]
+    y1 = p1[1]
+    x2 = p2[0]
+    y2 = p2[1]
+    steep = math.fabs(y2 - y1) > math.fabs(x2 - x1)
+    if steep:
+        t = x1
+        x1 = y1
+        y1 = t
+
+        t = x2
+        x2 = y2
+        y2 = t
+    also_steep = x1 > x2
+    if also_steep:
+        t = x1
+        x1 = x2
+        x2 = t
+
+        t = y1
+        y1 = y2
+        y2 = t
+
+    dx = x2 - x1
+    dy = math.fabs(y2 - y1)
+    error = 0.0
+    delta_error = 0.0 # Default if dx is zero
+    if dx != 0:
+        delta_error = math.fabs(dy/dx)
+
+    if y1 < y2:
+        y_step = 1
+    else:
+        y_step = -1
+
+    y = y1
+    ret = list([])
+    for x in range(x1, x2):
+        if steep:
+            p = (y, x)
+        else:
+            p = (x, y)
+
+        ret.append(p)
+
+        error += delta_error
+        if error >= 0.5:
+            y += y_step
+            error -= 1
+
+    if also_steep:
+       ret.reverse()
+
+    return ret
 
 
 if __name__ == '__main__':
