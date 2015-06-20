@@ -23,7 +23,7 @@ def test_landmarks_interpretation():
 
 def test_gpa():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
-    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
+    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x), landmarks_training_data)
 
     for i in range(8):
         plt.figure(1)
@@ -38,7 +38,7 @@ def test_gpa():
 
 def determine_b_parameters():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
-    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x, eps=10**-14), landmarks_training_data)
+    gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x), landmarks_training_data)
 
     for i in range(8):
         tooth_landmarks = np.array(gpa_landmarks[i])
@@ -83,12 +83,13 @@ def determine_b_parameters():
 
         for j in range(len(landmarks_training_data[i])):
             b_vector = np.dot(projection.T, (normalize_landmarks(landmarks_training_data[i][j]) - mean_landmarks))
-            print "b_vector, tooth %d, shape %d: %s" % (i, j+1, b_vector)
+            d = np.sum(np.divide(b_vector**2, eigenvalues[0:len(b_vector)]))
+            print "D_m^2: %f, b_vector, tooth %d, shape %d: %s" % (d, i, j+1, b_vector)
 
         plt.show()
 
 
 if __name__ == '__main__':
     # test_landmarks_interpretation()
-    test_gpa()
+    # test_gpa()
     determine_b_parameters()
