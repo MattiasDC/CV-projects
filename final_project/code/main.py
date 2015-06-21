@@ -18,12 +18,13 @@ radiographs_dir = "../data/Radiographs/"
 eps = 10**-12
 
 # Parameters for mapping model points to segment
-locality_search = 2
-wide_search = 5
+locality_search = 5
+wide_search = 9
 multi_resolution_levels = 4
 smooth_kernel_level = (15, 15)
-max_iterations = 50
+max_iterations = 20
 p_close = 0.9
+d_max = 2
 
 
 def main():
@@ -43,18 +44,35 @@ def main():
                                   landmarks_training_data)
     models = get_models(landmarks_training_data)
 
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, pre_processed_radiographs)
+    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels)
 
 
-def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, pre_processed_radiographs):
+def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels):
     print "Which picture? (number between 0 and %d)" % (len(cropped_landmarks_preprocessed)-1)
     picture = int(raw_input())
-    segment = get_segment(pre_processed_radiographs[picture], cropped_landmarks_preprocessed[picture])
+    segment = get_segment(cropped_landmarks_preprocessed[picture], cropped_landmarks_preprocessed[picture])
     for i in range(len(models)):
-        vector = fit_model(models[i], landmarks_neigbourhoods_levels[i], segment, cropped_landmarks_preprocessed[picture])
+        vector, fitted_model = fit_model(models[i], landmarks_neigbourhoods_levels[i], segment, cropped_landmarks_preprocessed[picture])
         d = np.sum(np.divide(vector**2, models[i][3]))
         print "model %d, d %f, dmax %f, result: %s" % (i, d, models[i][2], str(vector))
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, pre_processed_radiographs)
+
+        cost = 0
+        for j in range(0, len(fitted_model), 2):
+            cost_function = lambda x: np.dot(np.dot((x - landmarks_neigbourhoods_levels[i][0][j/2][0]),
+                                                    landmarks_neigbourhoods_levels[i][0][j/2][1]),
+                                             (x - landmarks_neigbourhoods_levels[i][0][j/2][0])[np.newaxis].T)
+            intensity_vector, normal_vector = get_normal_vector_intensity((fitted_model[j-2], fitted_model[j-1]),
+                                                                          (fitted_model[j], fitted_model[j+1]),
+                                                                          (fitted_model[(j+2) % len(fitted_model)],
+                                                                           fitted_model[(j+3) % len(fitted_model)]),
+                                                                          cropped_landmarks_preprocessed[picture],
+                                                                          wide_search)
+            fit_intensity_vector = intensity_vector[len(intensity_vector)/2-locality_search:len(intensity_vector)/2+locality_search+1]
+            cost += abs(cost_function(fit_intensity_vector.astype('float64')/(np.sum(intensity_vector)+1)))
+        cost /= len(fitted_model)/2
+        print cost
+
+    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels)
 
 
 # =====================================================
@@ -205,43 +223,42 @@ def draw_path(radiograph, path, color=255):
 #            SEGMENT
 # =====================================================
 
+t = None
+
 
 def get_segment(preprocessed_radiograph, radiograph):
     """
     Used to retrieve a tooth segment by manually drawing a box
     """
+    global t
+
     tmp_radiograph = preprocessed_radiograph.copy()
     cv2.imshow('window', tmp_radiograph)
     clicks = []
 
     def mouse_event(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONUP:
-            cv2.circle(tmp_radiograph, (x, y), 1, 255, 10)
+        global t
+        if event == cv2.EVENT_LBUTTONDOWN and len(clicks) == 0:
+            cv2.circle(param, (x, y), 1, 255, 10)
+            clicks.append((x, y))
+        if event == cv2.EVENT_MOUSEMOVE and len(clicks) == 1:
+            t = param.copy()
+            box = cv2.cv.BoxPoints((((x + clicks[0][0]) / 2, (y + clicks[0][1]) / 2), (x-clicks[0][0], y-clicks[0][1]), 0))
+            box = np.array(map(lambda (x, y): (np.int(x), np.int(y)), box))
+            cv2.drawContours(t, [box], 0, 255, 10)
+        if event == cv2.EVENT_LBUTTONUP and len(clicks) < 2:
             clicks.append((x, y))
 
-    cv2.setMouseCallback('window', mouse_event)
-    while len(clicks) < 4:
-        cv2.imshow('window', tmp_radiograph)
+    cv2.setMouseCallback('window', mouse_event, tmp_radiograph)
+    t = tmp_radiograph
+    while len(clicks) < 2:
+        cv2.imshow('window', t)
         cv2.waitKey(20)
 
-    (x, y), (w, h), angle = cv2.minAreaRect(np.array(clicks))
-
-    box = cv2.cv.BoxPoints(((x, y), (w, h), angle))
-    box = np.array(map(lambda (x, y): (np.int(x), np.int(y)), box))
-    cv2.drawContours(tmp_radiograph, [box], 0, 255, 10)
-    cv2.imshow('window', tmp_radiograph)
-    cv2.waitKey()
-
-    if angle < -45:
-        angle += 90
-        tmp = w
-        w = h
-        h = tmp
-
-    # m = cv2.getRotationMatrix2D((int(x), int(y)), angle, 1)
-    # r_h, r_w = radiograph.shape
-    # rotated = cv2.warpAffine(radiograph, m, (r_w, r_h), flags=cv2.INTER_CUBIC)
-    # return cv2.getRectSubPix(rotated, (int(w), int(h)), (int(x), int(y)))
+    x = (clicks[1][0] + clicks[0][0]) / 2
+    y = (clicks[1][1] + clicks[0][1]) / 2
+    w = abs(clicks[1][0] - clicks[0][0])
+    h = abs(clicks[1][1] - clicks[0][1])
 
     return (int(w), int(h)), (int(x), int(y))
 
@@ -388,7 +405,7 @@ def pre_process_for_landmarks(radiograph, show=False):
     return hist_result
 
 
-def get_models(landmarks_training_data, multiplier=1.2):
+def get_models(landmarks_training_data, multiplier=1.5):
     gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x), landmarks_training_data)
     models = []
     for i, tooth_landmarks in enumerate(gpa_landmarks):
@@ -425,7 +442,7 @@ def fit_model(model, landmarks_neighbourhood_levels, segment, radiograph):
     for l in range(multi_resolution_levels-1, -1, -1):
         vector, landmarks_segment = fit_model_one_level(model, vector, landmarks_segment, landmarks_neighbourhood_levels[l], segment_levels[l], radiograph_levels[l])
         landmarks_segment = map(lambda x: project_point_level(x, False), landmarks_segment)
-    return vector
+    return vector, map(lambda x: project_point_level(x, True), landmarks_segment)
 
 
 def fit_model_one_level(model, vector, initial_landmarks_segment, landmarks_neighbourhood, segment, radiograph):
@@ -444,6 +461,9 @@ def fit_model_one_level(model, vector, initial_landmarks_segment, landmarks_neig
             fitted_landmarks = rotate_landmarks(fitted_landmarks, transform_params[2])
             fitted_landmarks = np.divide(fitted_landmarks, np.dot(fitted_landmarks, model[0]))
             vector = np.dot(model[1].T, (normalize_landmarks(fitted_landmarks) - model[0]))
+            d = np.sum(np.divide(vector**2, model[3]))
+            if d > d_max:
+                vector = vector*(d_max/d)
             if np.sum(abs(vector - prev_vector)) < eps:
                 break
         _, s = scale_landmarks(landmarks_segment)
@@ -452,7 +472,6 @@ def fit_model_one_level(model, vector, initial_landmarks_segment, landmarks_neig
         landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, radiograph, segment, show=True)
         if (len(filter(lambda x: x <= wide_search/4 + 1, abs(landmarks_segment - prev))) >= p_close*len(landmarks_segment) or
                     count >= max_iterations) and count > 2:
-            print count
             break
         count += 1
     show_model(t, radiograph)
@@ -470,11 +489,10 @@ def show_model(model, segment, color=255, wait=None):
         cv2.waitKey(wait)
 
 
-def initial_fit_model(model, segment, ratio_width=0.4):
+def initial_fit_model(model, segment, ratio_width=1.0):
     """
     Returns an initial fit of the model to the segment
     """
-    # TODO improve the initial placement using Canny
     width, height = segment[0]
     model = model[0].copy()
 
@@ -483,10 +501,10 @@ def initial_fit_model(model, segment, ratio_width=0.4):
     s = abs(left_most - right_most)/(ratio_width*width)
     model, _ = scale_landmarks(model, s)
     _, y_model_coords = separate_landmarks(model)
-    return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-ratio_width*width/2-abs(y_model_coords.min())))[0]
+    return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-abs(y_model_coords.max())))[0]
 
 
-def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, segment, show=False, wait_time=50):
+def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, segment, show=True, wait_time=50):
     """
     Returns the optimal projection for each point of the model based on the image and
     the neighbourhood learned from the training data
@@ -506,9 +524,10 @@ def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, s
         k = landmarks_neighbourhood[i/2][0].size/2
         for j in range(k, intensity_vector.size-k):
             fit_intensity_vector = intensity_vector[j-k:j+k+1]
-            cost = cost_function(fit_intensity_vector.astype('float64')/np.sum(np.absolute(fit_intensity_vector)))
+            cost = cost_function(fit_intensity_vector.astype('float64')/(np.sum(intensity_vector)+1))
             if cost < min_cost and segment[1][0]-segment[0][0] < normal_vector[j][1] < segment[1][0]+segment[0][0]\
                     and segment[1][1]-segment[0][1] < normal_vector[j][0] < segment[1][1]+segment[0][1]:
+                print cost
                 min_cost = cost
                 points = normal_vector[j]
         projected_landmarks.append(points[1])
@@ -622,14 +641,15 @@ def learn_landmark_neighbourhood_level(landmarks, radiographs):
     for i in range(0, len(landmarks[0]), 2):
         intensity_vector_list = []
         for j, radiograph in enumerate(radiographs):
-            intensity_vector, _ = get_normal_vector_intensity((landmarks[j][i-2], landmarks[j][i-1]),
+            intensity_vector, normal_vector = get_normal_vector_intensity((landmarks[j][i-2], landmarks[j][i-1]),
                                                               (landmarks[j][i], landmarks[j][i+1]),
-                                                              (landmarks[j][(i+2) % len(landmarks)],
-                                                              landmarks[j][(i+3) % len(landmarks)]),
+                                                              (landmarks[j][(i+2) % len(landmarks[j])],
+                                                              landmarks[j][(i+3) % len(landmarks[j])]),
                                                               radiograph, locality_search)
-            intensity_vector_list.append(intensity_vector.astype('float64')/np.sum(np.absolute(intensity_vector)))
+            intensity_vector_list.append(intensity_vector.astype('float64')/(np.sum(intensity_vector)+1))
         intensity_vector_list = np.array(intensity_vector_list)
-        landmark_point_local_models.append((np.mean(intensity_vector_list, axis=0), np.cov(intensity_vector_list.T)**-1))
+        print np.linalg.cond(np.cov(intensity_vector_list.T))
+        landmark_point_local_models.append((np.mean(intensity_vector_list, axis=0), np.linalg.inv(np.cov(intensity_vector_list.T))))
     return landmark_point_local_models
 
 
