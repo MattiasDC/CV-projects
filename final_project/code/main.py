@@ -430,7 +430,7 @@ def fit_model(model, landmarks_neighbourhood, segment, radiograph):
         _, s = scale_landmarks(landmarks_segment)
         landmarks_segment, _ = procrustes_analysis(landmarks_segment, model[0] + np.dot(model[1], vector), 1/s)
         t = landmarks_segment.copy()
-        landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, radiograph, segment, show=False)
+        landmarks_segment = get_projected_landmarks(landmarks_segment, landmarks_neighbourhood, radiograph, segment, show=True)
         if landmarks_segment is None or count > 1000:
             # print 'too many outlying points'
             vector = np.array([float('inf'), float('inf'), float('inf')])
@@ -447,7 +447,7 @@ def fit_model(model, landmarks_neighbourhood, segment, radiograph):
 def show_model(model, segment, color=255, wait=None):
     segment = segment.copy()
     for i in range(0, len(model), 2):
-        cv2.circle(segment, (int(model[i]), int(model[i+1])), 3, color)
+        cv2.circle(segment, (int(model[i]), int(model[i+1])), 4, color, -1)
     cv2.imshow('window', segment)
     if wait is None:
         cv2.waitKey()
@@ -471,7 +471,7 @@ def initial_fit_model(model, segment, ratio_width=0.4):
     return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-ratio_width*width/2-abs(y_model_coords.min())))[0]
 
 
-def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, segment, show=False):
+def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, segment, show=False, wait_time=10):
     """
     Returns the optimal projection for each point of the model based on the image and
     the neighbourhood learned from the training data
@@ -493,8 +493,8 @@ def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, s
         for j in range(k, intensity_vector.size-k):
             fit_intensity_vector = intensity_vector[j-k:j+k+1]
             cost = cost_function(fit_intensity_vector.astype('float64')/np.sum(np.absolute(fit_intensity_vector)))
-            if cost < min_cost and normal_vector[j][1] > segment[1][0]-segment[0][0] and normal_vector[j][1] < segment[1][0]+segment[0][0]\
-            and normal_vector[j][0] > segment[1][1]-segment[0][1] and normal_vector[j][0] < segment[1][1]+segment[0][1]:
+            if cost < min_cost and segment[1][0]-segment[0][0] < normal_vector[j][1] < segment[1][0]+segment[0][0]\
+                    and segment[1][1]-segment[0][1] < normal_vector[j][0] < segment[1][1]+segment[0][1]:
                 min_cost = cost
                 points = normal_vector[j]
         projected_landmarks.append(points[1])
@@ -503,11 +503,11 @@ def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, s
             count += 1
         if show:
             cv2.line(draw_image, (normal_vector[0][1], normal_vector[0][0]), (normal_vector[-1][1], normal_vector[-1][0]), 120, 1)
-            cv2.circle(draw_image, (int(fitted_model[i]), int(fitted_model[i+1])), 1, 255)
-            cv2.circle(draw_image, (int(points[1]), int(points[0])), 1, 0)
+            cv2.circle(draw_image, (int(fitted_model[i]), int(fitted_model[i+1])), 3, 255, -1)
+            cv2.circle(draw_image, (int(points[1]), int(points[0])), 3, 0, -1)
     if show:
         cv2.imshow('window', draw_image)
-        cv2.waitKey(500)
+        cv2.waitKey(wait_time)
     if count >= len(fitted_model)/8:
         return None
     return np.array(projected_landmarks)
