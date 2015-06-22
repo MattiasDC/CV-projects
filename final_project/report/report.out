@@ -1,0 +1,13 @@
+\BOOKMARK [1][-]{section.1}{Introduction}{}% 1
+\BOOKMARK [1][-]{section.2}{Active Shape Model}{}% 2
+\BOOKMARK [2][-]{subsection.2.1}{Procrustes analysis}{section.2}% 3
+\BOOKMARK [2][-]{subsection.2.2}{Principal component analysis}{section.2}% 4
+\BOOKMARK [1][-]{section.3}{Segmentation of the dental radiographs}{}% 5
+\BOOKMARK [2][-]{subsection.3.1}{Pre-processing}{section.3}% 6
+\BOOKMARK [2][-]{subsection.3.2}{Gap valley detection}{section.3}% 7
+\BOOKMARK [1][-]{section.4}{Fit the model to an image}{}% 8
+\BOOKMARK [2][-]{subsection.4.1}{Initial fit}{section.4}% 9
+\BOOKMARK [2][-]{subsection.4.2}{Update pose and shape parameters to fit model to image landmarks}{section.4}% 10
+\BOOKMARK [2][-]{subsection.4.3}{Find landmarks on image based on neighbourhood near model points}{section.4}% 11
+\BOOKMARK [2][-]{subsection.4.4}{Multi-resolution fitting}{section.4}% 12
+\BOOKMARK [1][-]{section.5}{Evaluation}{}% 13

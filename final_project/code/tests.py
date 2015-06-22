@@ -56,7 +56,7 @@ def determine_b_parameters():
         plt.axis('equal')
         plot, = plt.plot(x2, y2, color='blue')
         plt.plot(x2, y2, color='red')
-        plt.plot(x3, y3, color='green')
+        # plt.plot(x3, y3, color='green')
 
         ax_comp1 = plt.axes([0.25, 0.1, 0.65, 0.03])
         slider_comp1 = Slider(ax_comp1, 'PCA 1', -3*math.sqrt(eigenvalues[0]), 3*math.sqrt(eigenvalues[0]), valinit=0)

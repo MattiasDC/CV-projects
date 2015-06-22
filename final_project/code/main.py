@@ -19,9 +19,9 @@ radiographs_dir = "../data/Radiographs/"
 eps = 10**-12
 
 # Parameters for mapping model points to segment
-locality_search = 2
-wide_search = 5
-multi_resolution_levels = 4
+locality_search = 3
+wide_search = 7
+multi_resolution_levels = 3
 smooth_kernel_level = (15, 15)
 max_iterations = 20
 p_close = 0.9
@@ -35,7 +35,7 @@ def main():
     cropped_radiographs = map(crop_radiograph, original_radiographs)
 
     pre_processed_radiographs = map(pre_process_radiograph, cropped_radiographs)
-    # map(lambda x: segment_teeth(x, 50), pre_processed_radiographs)
+    horizontal_paths = map(lambda x: segment_teeth(x, 50), pre_processed_radiographs)
 
     landmarks_preprocessed = map(pre_process_for_landmarks, original_radiographs)
     cropped_landmarks_preprocessed = map(crop_radiograph, landmarks_preprocessed)
@@ -45,17 +45,26 @@ def main():
                                   landmarks_training_data)
     models = get_models(landmarks_training_data)
 
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels)
+    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths)
 
 
-def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels):
+def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths):
     print "Which picture? (number between 0 and %d)" % (len(cropped_landmarks_preprocessed)-1)
     picture = int(raw_input())
     segment = get_segment(cropped_landmarks_preprocessed[picture], cropped_landmarks_preprocessed[picture])
-    for i in range(len(models)):
-        vector, fitted_model = fit_model(models[i], landmarks_neigbourhoods_levels[i], segment, cropped_landmarks_preprocessed[picture])
+
+    mid_height = segment[1][1]
+    mid_width = segment[1][0]
+    path = horizontal_paths[picture]
+    first = 4
+    for i in range(0, len(path)-1, 2):
+        if path[i][0] <= mid_width <= path[i+1]:
+            if mid_height <= (path[i][1]+path[i+1][1])/2:
+                first = 0
+
+    for i in range(first, len(models) - 4 + first):
+        vector, fitted_model = fit_model(models[i], landmarks_neigbourhoods_levels[i], segment, cropped_landmarks_preprocessed[picture], (first == 0))
         d = np.sum(np.divide(vector**2, models[i][3]))
-        print "model %d, d %f, dmax %f, result: %s" % (i, d, models[i][2], str(vector))
 
         cost = 0
         for j in range(0, len(fitted_model), 2):
@@ -72,9 +81,9 @@ def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels):
             fit_intensity_vector = intensity_vector[len(intensity_vector)/2-locality_search:len(intensity_vector)/2+locality_search+1]
             cost += abs(cost_function(fit_intensity_vector.astype('float64')/(np.sum(fit_intensity_vector)+1)))
         cost /= len(fitted_model)/2
-        print cost
+        print "model %d, d %f, dmax %f, eucl. cost: %f, b-vector: %s" % (i, d, models[i][2], cost, str(vector))
 
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels)
+    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths)
 
 
 # =====================================================
@@ -265,7 +274,7 @@ def get_segment(preprocessed_radiograph, radiograph):
     return (int(w), int(h)), (int(x), int(y))
 
 
-def segment_teeth(radiograph, interval):
+def segment_teeth(radiograph, interval, show=False):
     """
     Attempts to segment the teeth on the radiograph
     """
@@ -345,15 +354,18 @@ def segment_teeth(radiograph, interval):
     paths = map(lambda x: trim_path(mask2, x), paths)
     paths = remove_short_paths(paths, width, 0.3)
     best_path = sorted(map(lambda x: (path_intensity(radiograph, x)/(path_length(x)), x), paths))[0][1]
-    map(lambda x: draw_path(draw_image, x, color=150), paths)
-    map(lambda x: cv2.putText(draw_image, str(int(path_intensity(radiograph, x)/(path_length(x)))), x[0], cv.CV_FONT_HERSHEY_PLAIN, 5, 255), paths)
-    draw_path(draw_image, best_path)
 
-    #plotting
-    for v, x, y in minimal_points:
-        cv2.circle(draw_image, (x, y), 1, 150, 10)
-    cv2.imshow('window', draw_image)
-    cv2.waitKey()
+    if show:
+        map(lambda x: draw_path(draw_image, x, color=150), paths)
+        map(lambda x: cv2.putText(draw_image, str(int(path_intensity(radiograph, x)/(path_length(x)))), x[0], cv.CV_FONT_HERSHEY_PLAIN, 5, 255), paths)
+        draw_path(draw_image, best_path)
+        #plotting
+        for v, x, y in minimal_points:
+            cv2.circle(draw_image, (x, y), 1, 150, 10)
+        cv2.imshow('window', draw_image)
+        cv2.waitKey()
+
+    return best_path
 
 
 def gaussian_function(sigma, u):
@@ -427,7 +439,7 @@ def get_models(landmarks_training_data, multiplier=1.5):
     return models
 
 
-def fit_model(model, landmarks_neighbourhood_levels, segment, radiograph):
+def fit_model(model, landmarks_neighbourhood_levels, segment, radiograph, top):
     """
     Fits the given model using an iterative method and returns the vector needed to project the model to the image
     """
@@ -440,7 +452,7 @@ def fit_model(model, landmarks_neighbourhood_levels, segment, radiograph):
                                (project_point_level(segment_levels[-1][1][0], True),
                                 project_point_level(segment_levels[-1][1][1], True))))
     vector = np.array([0, 0, 0])
-    landmarks_segment = initial_fit_model(model, segment_levels[-1])
+    landmarks_segment = initial_fit_model(model, segment_levels[-1], top)
     for l in range(multi_resolution_levels-1, -1, -1):
         vector, landmarks_segment = fit_model_one_level(model, vector, landmarks_segment, landmarks_neighbourhood_levels[l], segment_levels[l], radiograph_levels[l])
         landmarks_segment = map(lambda x: project_point_level(x, False), landmarks_segment)
@@ -491,7 +503,7 @@ def show_model(model, segment, color=255, wait=None):
         cv2.waitKey(wait)
 
 
-def initial_fit_model(model, segment, ratio=1.0):
+def initial_fit_model(model, segment, top, ratio=1.0):
     """
     Returns an initial fit of the model to the segment
     """
@@ -505,7 +517,10 @@ def initial_fit_model(model, segment, ratio=1.0):
     s_h = abs(up_most - down_most)/(ratio*height)
     model, _ = scale_landmarks(model, max(s_w, s_h))
     _, y_model_coords = separate_landmarks(model)
-    return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-abs(y_model_coords.max())))[0]
+    if top:
+        return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-abs(y_model_coords.max())))[0]
+    else:
+        return translate_landmarks(model, (segment[1][0], segment[1][1]-height/2+abs(y_model_coords.min())))[0]
 
 
 def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, segment, show=True, wait_time=50):
@@ -915,6 +930,15 @@ def bresenham_march(img, p1, p2):
        ret.reverse()
 
     return ret
+
+
+def save_image(image, name=None):
+    cv2.imshow('window', image)
+    cv2.waitKey()
+    if name is None:
+        print "Give the file name"
+        name = raw_input()
+    cv2.imwrite('../figures/'+name+'.png', image)
 
 
 if __name__ == '__main__':

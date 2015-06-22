@@ -1,0 +1,14 @@
+\select@language {english}
+\contentsline {section}{\numberline {1}Introduction}{1}{section.1}
+\contentsline {section}{\numberline {2}Active Shape Model}{2}{section.2}
+\contentsline {subsection}{\numberline {2.1}Procrustes analysis}{2}{subsection.2.1}
+\contentsline {subsection}{\numberline {2.2}Principal component analysis}{2}{subsection.2.2}
+\contentsline {section}{\numberline {3}Segmentation of the dental radiographs}{3}{section.3}
+\contentsline {subsection}{\numberline {3.1}Pre-processing}{3}{subsection.3.1}
+\contentsline {subsection}{\numberline {3.2}Gap valley detection}{4}{subsection.3.2}
+\contentsline {section}{\numberline {4}Fit the model to an image}{5}{section.4}
+\contentsline {subsection}{\numberline {4.1}Initial fit}{5}{subsection.4.1}
+\contentsline {subsection}{\numberline {4.2}Update pose and shape parameters to fit model to image landmarks}{5}{subsection.4.2}
+\contentsline {subsection}{\numberline {4.3}Find landmarks on image based on neighbourhood near model points}{5}{subsection.4.3}
+\contentsline {subsection}{\numberline {4.4}Multi-resolution fitting}{5}{subsection.4.4}
+\contentsline {section}{\numberline {5}Evaluation}{5}{section.5}
