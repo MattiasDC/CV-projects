@@ -8,6 +8,7 @@ import re
 from scipy.signal import argrelextrema
 import scipy.fftpack
 import matplotlib.pyplot as plt
+import random
 
 
 # Directories
@@ -18,8 +19,8 @@ radiographs_dir = "../data/Radiographs/"
 eps = 10**-12
 
 # Parameters for mapping model points to segment
-locality_search = 5
-wide_search = 9
+locality_search = 2
+wide_search = 5
 multi_resolution_levels = 4
 smooth_kernel_level = (15, 15)
 max_iterations = 20
@@ -61,6 +62,7 @@ def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels):
             cost_function = lambda x: np.dot(np.dot((x - landmarks_neigbourhoods_levels[i][0][j/2][0]),
                                                     landmarks_neigbourhoods_levels[i][0][j/2][1]),
                                              (x - landmarks_neigbourhoods_levels[i][0][j/2][0])[np.newaxis].T)
+
             intensity_vector, normal_vector = get_normal_vector_intensity((fitted_model[j-2], fitted_model[j-1]),
                                                                           (fitted_model[j], fitted_model[j+1]),
                                                                           (fitted_model[(j+2) % len(fitted_model)],
@@ -68,7 +70,7 @@ def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels):
                                                                           cropped_landmarks_preprocessed[picture],
                                                                           wide_search)
             fit_intensity_vector = intensity_vector[len(intensity_vector)/2-locality_search:len(intensity_vector)/2+locality_search+1]
-            cost += abs(cost_function(fit_intensity_vector.astype('float64')/(np.sum(intensity_vector)+1)))
+            cost += abs(cost_function(fit_intensity_vector.astype('float64')/(np.sum(fit_intensity_vector)+1)))
         cost /= len(fitted_model)/2
         print cost
 
@@ -489,17 +491,19 @@ def show_model(model, segment, color=255, wait=None):
         cv2.waitKey(wait)
 
 
-def initial_fit_model(model, segment, ratio_width=1.0):
+def initial_fit_model(model, segment, ratio=1.0):
     """
     Returns an initial fit of the model to the segment
     """
     width, height = segment[0]
     model = model[0].copy()
 
-    x_model_coords, _ = separate_landmarks(model)
+    x_model_coords, y_model_coords = separate_landmarks(model)
     left_most, right_most = x_model_coords.min(), x_model_coords.max()
-    s = abs(left_most - right_most)/(ratio_width*width)
-    model, _ = scale_landmarks(model, s)
+    up_most, down_most = y_model_coords.min(), y_model_coords.max()
+    s_w = abs(left_most - right_most)/(ratio*width)
+    s_h = abs(up_most - down_most)/(ratio*height)
+    model, _ = scale_landmarks(model, max(s_w, s_h))
     _, y_model_coords = separate_landmarks(model)
     return translate_landmarks(model, (segment[1][0], segment[1][1]+height/2-abs(y_model_coords.max())))[0]
 
@@ -524,10 +528,9 @@ def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, s
         k = landmarks_neighbourhood[i/2][0].size/2
         for j in range(k, intensity_vector.size-k):
             fit_intensity_vector = intensity_vector[j-k:j+k+1]
-            cost = cost_function(fit_intensity_vector.astype('float64')/(np.sum(intensity_vector)+1))
+            cost = cost_function(fit_intensity_vector.astype('float64')/(np.sum(fit_intensity_vector)+1))
             if cost < min_cost and segment[1][0]-segment[0][0] < normal_vector[j][1] < segment[1][0]+segment[0][0]\
                     and segment[1][1]-segment[0][1] < normal_vector[j][0] < segment[1][1]+segment[0][1]:
-                print cost
                 min_cost = cost
                 points = normal_vector[j]
         projected_landmarks.append(points[1])
@@ -542,42 +545,39 @@ def get_projected_landmarks(fitted_model, landmarks_neighbourhood, radiograph, s
     return np.array(projected_landmarks)
 
 
-def get_normal_vector_intensity(prev, cur, next, segment, search_length, show=False):
+def get_normal_vector_intensity(prev, cur, next, segment, search_length):
     """
     Returns the intensity and coordinates of the points on the normal for the given coordinates
     """
     height, width = segment.shape
-    if next[1] != prev[1]:
-        rico = -float(next[0]-prev[0])/float(next[1]-prev[1])
-    else:
-        rico = 10000
-    eq = lambda x: rico*(x-cur[0])+cur[1]
-
-    min_x = int(cur[0]-search_length-1)
-    max_x = int(math.ceil(cur[0]+search_length+1))
-    min_y = int(eq(min_x))
-    max_y = int(math.ceil(eq(max_x)))
-
-    line_points = bresenham_march(segment, (min_x, min_y), (max_x, max_y))
-
-    diff = float(len(line_points)) - (2*search_length + 1)
-    line_points = line_points[int(diff/2):len(line_points)-int(math.ceil(diff/2))]
-
     hist = []
     normal_vector = []
-    for x, y in line_points:
-        if 0 < y < height and 0 < x < width:
-            hist.append(segment[y, x])
-            normal_vector.append((y, x))
-        else:
-            hist.append(0)
-            normal_vector.append((y, x))
+    if abs(next[1] - prev[1]) > 2:
+        rico = -float(next[0]-prev[0])/float(next[1]-prev[1])
+        eq = lambda x: rico*(x-cur[0])+cur[1]
 
-    if show:
-        cv2.line(segment, line_points[0], line_points[-1], 255)
-        cv2.circle(segment, (int(cur[0]), int(cur[1])), 1, 0)
-        cv2.imshow('window', segment)
-        cv2.waitKey()
+        min_x = int(cur[0]-search_length-1)
+        max_x = int(math.ceil(cur[0]+search_length+1))
+        min_y = int(eq(min_x))
+        max_y = int(math.ceil(eq(max_x)))
+
+        line_points = bresenham_march(segment, (min_x, min_y), (max_x, max_y))
+
+        diff = float(len(line_points)) - (2*search_length + 1)
+        line_points = line_points[int(diff/2):len(line_points)-int(math.ceil(diff/2))]
+
+        for x, y in line_points:
+            if 0 < y < height and 0 < x < width:
+                hist.append(segment[y, x])
+                normal_vector.append((y, x))
+            else:
+                hist.append(0)
+                normal_vector.append((y, x))
+    else:
+        for y in range(int(cur[1])-search_length, int(cur[1])+search_length+1):
+            hist.append(segment[y, int(cur[0])])
+            normal_vector.append((y, int(cur[0])))
+
     return np.array(hist), normal_vector
 
 
@@ -648,8 +648,9 @@ def learn_landmark_neighbourhood_level(landmarks, radiographs):
                                                               radiograph, locality_search)
             intensity_vector_list.append(intensity_vector.astype('float64')/(np.sum(intensity_vector)+1))
         intensity_vector_list = np.array(intensity_vector_list)
-        print np.linalg.cond(np.cov(intensity_vector_list.T))
-        landmark_point_local_models.append((np.mean(intensity_vector_list, axis=0), np.linalg.inv(np.cov(intensity_vector_list.T))))
+        # cov = np.linalg.inv(np.cov(intensity_vector_list.T))
+        cov = np.identity(locality_search*2+1)
+        landmark_point_local_models.append((np.mean(intensity_vector_list, axis=0), cov))
     return landmark_point_local_models
 
 
