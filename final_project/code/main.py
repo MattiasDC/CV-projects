@@ -8,7 +8,6 @@ import re
 from scipy.signal import argrelextrema
 import scipy.fftpack
 import matplotlib.pyplot as plt
-import random
 
 
 # Directories
@@ -29,9 +28,17 @@ d_max = 2
 
 
 def main():
+    cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths = initialise()
+    select_tooth(cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths)
+
+
+def initialise(leave_image_out=None):
     cv2.namedWindow('window', cv2.WINDOW_NORMAL)
     cv2.resizeWindow('window', 600, 800)
     original_radiographs = read_radiographs(radiographs_dir)
+    if leave_image_out is not None:
+        test_image = original_radiographs[leave_image_out]
+        del original_radiographs[leave_image_out]
     cropped_radiographs = map(crop_radiograph, original_radiographs)
 
     pre_processed_radiographs = map(pre_process_radiograph, cropped_radiographs)
@@ -41,21 +48,29 @@ def main():
     cropped_landmarks_preprocessed = map(crop_radiograph, landmarks_preprocessed)
 
     landmarks_training_data = create_landmarks_data(landmarks_dir)
-    landmarks_neigbourhoods_levels = map(lambda x: learn_landmark_neighbourhood(x, landmarks_preprocessed),
+    landmarks_neighbourhoods_levels = map(lambda x: learn_landmark_neighbourhood(x, landmarks_preprocessed),
                                   landmarks_training_data)
     models = get_models(landmarks_training_data)
+    if leave_image_out is not None:
+        return cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths, test_image
+    return cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths
 
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths)
+
+def select_tooth(cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths):
+    print "Which image? (number between 0 and %d)" % (len(cropped_landmarks_preprocessed)-1)
+    image_index = int(raw_input())
+    segment = get_segment(cropped_landmarks_preprocessed[image_index])
+    path = horizontal_paths[image_index]
+    image = cropped_landmarks_preprocessed[image_index]
+
+    fit_tooth(image, models, landmarks_neighbourhoods_levels, path, segment)
+
+    select_tooth(cropped_landmarks_preprocessed, models, landmarks_neighbourhoods_levels, horizontal_paths)
 
 
-def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths):
-    print "Which picture? (number between 0 and %d)" % (len(cropped_landmarks_preprocessed)-1)
-    picture = int(raw_input())
-    segment = get_segment(cropped_landmarks_preprocessed[picture], cropped_landmarks_preprocessed[picture])
-
+def fit_tooth(image, models, landmarks_neighbourhoods_levels, path, segment):
     mid_height = segment[1][1]
     mid_width = segment[1][0]
-    path = horizontal_paths[picture]
     first = 4
     for i in range(0, len(path)-1, 2):
         if path[i][0] <= mid_width <= path[i+1]:
@@ -63,27 +78,24 @@ def f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, ho
                 first = 0
 
     for i in range(first, len(models) - 4 + first):
-        vector, fitted_model = fit_model(models[i], landmarks_neigbourhoods_levels[i], segment, cropped_landmarks_preprocessed[picture], (first == 0))
+        vector, fitted_model = fit_model(models[i], landmarks_neighbourhoods_levels[i], segment, image, (first == 0))
         d = np.sum(np.divide(vector**2, models[i][3]))
 
         cost = 0
         for j in range(0, len(fitted_model), 2):
-            cost_function = lambda x: np.dot(np.dot((x - landmarks_neigbourhoods_levels[i][0][j/2][0]),
-                                                    landmarks_neigbourhoods_levels[i][0][j/2][1]),
-                                             (x - landmarks_neigbourhoods_levels[i][0][j/2][0])[np.newaxis].T)
+            cost_function = lambda x: np.dot(np.dot((x - landmarks_neighbourhoods_levels[i][0][j/2][0]),
+                                                    landmarks_neighbourhoods_levels[i][0][j/2][1]),
+                                             (x - landmarks_neighbourhoods_levels[i][0][j/2][0])[np.newaxis].T)
 
             intensity_vector, normal_vector = get_normal_vector_intensity((fitted_model[j-2], fitted_model[j-1]),
                                                                           (fitted_model[j], fitted_model[j+1]),
                                                                           (fitted_model[(j+2) % len(fitted_model)],
                                                                            fitted_model[(j+3) % len(fitted_model)]),
-                                                                          cropped_landmarks_preprocessed[picture],
-                                                                          wide_search)
+                                                                          image, wide_search)
             fit_intensity_vector = intensity_vector[len(intensity_vector)/2-locality_search:len(intensity_vector)/2+locality_search+1]
             cost += abs(cost_function(fit_intensity_vector.astype('float64')/(np.sum(fit_intensity_vector)+1)))
         cost /= len(fitted_model)/2
         print "model %d, d %f, dmax %f, eucl. cost: %f, b-vector: %s" % (i, d, models[i][2], cost, str(vector))
-
-    f(cropped_landmarks_preprocessed, models, landmarks_neigbourhoods_levels, horizontal_paths)
 
 
 # =====================================================
@@ -237,13 +249,13 @@ def draw_path(radiograph, path, color=255):
 t = None
 
 
-def get_segment(preprocessed_radiograph, radiograph):
+def get_segment(radiograph):
     """
     Used to retrieve a tooth segment by manually drawing a box
     """
     global t
 
-    tmp_radiograph = preprocessed_radiograph.copy()
+    tmp_radiograph = radiograph.copy()
     cv2.imshow('window', tmp_radiograph)
     clicks = []
 
