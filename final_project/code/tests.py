@@ -38,6 +38,12 @@ def test_gpa():
 
 def determine_b_parameters():
     landmarks_training_data = create_landmarks_data(landmarks_dir)
+
+    test = []
+    for x in landmarks_training_data:
+        test.append(x[0])
+        del x[0]
+
     gpa_landmarks = map(lambda x: generalized_procrustes_analysis(x), landmarks_training_data)
 
     for i in range(8):
@@ -50,13 +56,13 @@ def determine_b_parameters():
         projection = np.transpose(np.array([eigenvectors[0], eigenvectors[1], eigenvectors[2]]))
         mean_landmarks = mean_landmarks_normalized(gpa_landmarks[i])
         x2, y2 = separate_landmarks(mean_landmarks)
-        x3, y3 = separate_landmarks(normalize_landmarks(landmarks_training_data[i][0]))
+        x3, y3 = separate_landmarks(normalize_landmarks(test[i]))
 
         fig = plt.figure()
         plt.axis('equal')
         plot, = plt.plot(x2, y2, color='blue')
         plt.plot(x2, y2, color='red')
-        # plt.plot(x3, y3, color='green')
+        plt.plot(x3, y3, color='green')
 
         ax_comp1 = plt.axes([0.25, 0.1, 0.65, 0.03])
         slider_comp1 = Slider(ax_comp1, 'PCA 1', -3*math.sqrt(eigenvalues[0]), 3*math.sqrt(eigenvalues[0]), valinit=0)
@@ -85,6 +91,10 @@ def determine_b_parameters():
             b_vector = np.dot(projection.T, (normalize_landmarks(landmarks_training_data[i][j]) - mean_landmarks))
             d = np.sum(np.divide(b_vector**2, eigenvalues[0:len(b_vector)]))
             print "D_m^2: %f, b_vector, tooth %d, shape %d: %s" % (d, i, j+1, b_vector)
+
+        b_vector = np.dot(projection.T, (normalize_landmarks(test[i]) - mean_landmarks))
+        d = np.sum(np.divide(b_vector**2, eigenvalues[0:len(b_vector)]))
+        print "D_m^2: %f, b_vector, tooth %d, shape %d: %s" % (d, i, 0, b_vector)
 
         plt.show()
 

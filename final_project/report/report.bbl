@@ -1,0 +1,18 @@
+\begin{thebibliography}{1}
+
+\bibitem{cootes2000introduction}
+Tim Cootes, ER~Baldock, and J~Graham.
+\newblock An introduction to active shape models.
+\newblock {\em Image processing and analysis}, pages 223--248, 2000.
+
+\bibitem{cootes1995active}
+Timothy~F Cootes, Christopher~J Taylor, David~H Cooper, and Jim Graham.
+\newblock Active shape models-their training and application.
+\newblock {\em Computer vision and image understanding}, 61(1):38--59, 1995.
+
+\bibitem{nomir2005system}
+Omaima Nomir and Mohamed Abdel-Mottaleb.
+\newblock A system for human identification from x-ray dental radiographs.
+\newblock {\em Pattern Recognition}, 38(8):1295--1305, 2005.
+
+\end{thebibliography}
